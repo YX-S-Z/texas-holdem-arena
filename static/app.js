@@ -25,6 +25,7 @@ function clearGame() {
 function cardEl(code, hidden) {
   var wrap = document.createElement("span");
   wrap.className = "card-wrap";
+  wrap.setAttribute("data-code", hidden ? "?" : code);
   if (hidden) {
     var img = document.createElement("img");
     img.src = "/static/img/cards/card.png";
@@ -55,43 +56,204 @@ function cardEl(code, hidden) {
   return wrap;
 }
 
+// Compute seat position on an ellipse.
+// Player 0 is at the bottom (angle 0 = 6 o'clock), others spread evenly clockwise.
+// Returns { top: "XX%", left: "YY%" }
+function seatPosition(playerIndex, totalPlayers) {
+  // Angle in radians: start at bottom (π/2 in standard math = 6 o'clock),
+  // go clockwise. We use: angle = (2π * i / n) starting from bottom.
+  // In CSS coordinates: top grows downward, left grows rightward.
+  // bottom = angle 0 → (left:50%, top:93%)
+  // clockwise means increasing angle goes left-then-up-then-right-then-down
+  var angle = (2 * Math.PI * playerIndex) / totalPlayers;
+  // Parametric ellipse: x = cx + rx*sin(angle), y = cy + ry*cos(angle)
+  // sin(0)=0,cos(0)=1 → bottom center ✓
+  // Going clockwise: sin increases (→ left decreases), cos decreases (→ top decreases)
+  // We want clockwise visually, so left player first:
+  // angle increases → go counter-clockwise in math → clockwise on screen if we negate sin
+  // Actually let's just be explicit:
+  //   CSS left% = 50 + rx * sin(angle)   [positive angle → right on screen? no...]
+  // Let me think simply:
+  //   angle=0 → bottom center: left=50%, top=93%  (cos=1 → top is high%)
+  //   angle=π → top center:    left=50%, top=7%   (cos=-1 → top is low%)
+  //   Going clockwise from bottom means next seat is bottom-LEFT,
+  //   so sin should be negative for small positive angles.
+  // Formula:
+  //   left = 50 - rx * sin(angle)
+  //   top  = 50 + ry * cos(angle)
+  var rx = 44; // horizontal radius in %
+  var ry = 43; // vertical radius in %
+  // Push diagonal seats (corners) further out so they don't overlap neighbors.
+  // diagonalness is 1.0 at 45/135/225/315° and 0.0 at 0/90/180/270°.
+  var diagonalness = Math.abs(Math.sin(2 * angle));
+  var boost = 1 + 0.22 * diagonalness;
+  var left = 50 - rx * boost * Math.sin(angle);
+  var top  = 50 + ry * boost * Math.cos(angle);
+  return { top: top + "%", left: left + "%" };
+}
+
+// Get the cards key for a player (used to decide if cards need rebuilding)
+function cardsKey(p) {
+  if (p.hole_cards && p.hole_cards.length > 0) {
+    return p.hole_cards.join(",");
+  }
+  return "hidden";
+}
+
 function renderPlayers(state) {
   var container = el("players");
-  container.innerHTML = "";
   var currentId = state.current_player_id;
-  for (var i = 0; i < state.players.length; i++) {
+  var n = state.players.length;
+  var dealerIdx = state.dealer_index != null ? state.dealer_index : -1;
+  var sbIdx = state.small_blind_index != null ? state.small_blind_index : -1;
+  var bbIdx = state.big_blind_index != null ? state.big_blind_index : -1;
+
+  // Index existing player divs by player id
+  var existingDivs = {};
+  var oldChildren = container.querySelectorAll(".player");
+  for (var c = 0; c < oldChildren.length; c++) {
+    var pid = oldChildren[c].getAttribute("data-player-id");
+    if (pid) existingDivs[pid] = oldChildren[c];
+  }
+
+  var usedIds = {};
+
+  for (var i = 0; i < n; i++) {
     var p = state.players[i];
-    var div = document.createElement("div");
-    var cls = "player";
-    if (p.folded) cls += " folded";
-    if (p.id === currentId) cls += " current-turn";
-    if (p.id === HUMAN_ID) cls += " is-human";
-    div.className = cls;
-    var label = p.display_name || p.id;
-    if (p.id === HUMAN_ID) label += " (You)";
-    div.innerHTML =
-      '<div class="name">' + label + '</div>' +
-      '<div class="stack">Stack: ' + p.stack + '</div>' +
-      '<div class="bet">Bet: ' + p.current_bet + '</div>' +
-      '<div class="cards"></div>';
-    var cardsEl = div.querySelector(".cards");
-    if (p.hole_cards && p.hole_cards.length > 0) {
-      for (var j = 0; j < p.hole_cards.length; j++) {
-        cardsEl.appendChild(cardEl(p.hole_cards[j], false));
+    usedIds[p.id] = true;
+
+    var pos = seatPosition(i, n);
+    var existing = existingDivs[p.id];
+
+    if (existing) {
+      // Update in place — no rebuild, no flash
+
+      // Update position
+      existing.style.top = pos.top;
+      existing.style.left = pos.left;
+
+      // Update className
+      var cls = "player";
+      if (p.folded) cls += " folded";
+      if (p.id === currentId) cls += " current-turn";
+      if (p.id === HUMAN_ID) cls += " is-human";
+      if (existing.className !== cls) existing.className = cls;
+
+      // Update name + badges
+      var label = p.display_name || p.id;
+      if (p.id === HUMAN_ID) label += " (You)";
+      var badges = "";
+      if (i === dealerIdx) badges += '<span class="badge badge-dealer">D</span>';
+      if (i === sbIdx) badges += '<span class="badge badge-sb">SB</span>';
+      if (i === bbIdx) badges += '<span class="badge badge-bb">BB</span>';
+      var nameEl = existing.querySelector(".name");
+      var nameHTML = label + badges;
+      if (nameEl.innerHTML !== nameHTML) nameEl.innerHTML = nameHTML;
+
+      // Update stack
+      var stackEl = existing.querySelector(".stack");
+      var stackText = "Stack: " + p.stack;
+      if (stackEl.textContent !== stackText) stackEl.textContent = stackText;
+
+      // Update bet
+      var betEl = existing.querySelector(".bet");
+      var betText = "Bet: " + p.current_bet;
+      if (betEl.textContent !== betText) betEl.textContent = betText;
+
+      // Only rebuild cards if they actually changed
+      var newCK = cardsKey(p);
+      if (existing.getAttribute("data-cards") !== newCK) {
+        existing.setAttribute("data-cards", newCK);
+        var cardsEl = existing.querySelector(".cards");
+        cardsEl.innerHTML = "";
+        if (p.hole_cards && p.hole_cards.length > 0) {
+          for (var j = 0; j < p.hole_cards.length; j++) {
+            cardsEl.appendChild(cardEl(p.hole_cards[j], false));
+          }
+        } else {
+          cardsEl.appendChild(cardEl("?", true));
+          cardsEl.appendChild(cardEl("?", true));
+        }
       }
     } else {
-      cardsEl.appendChild(cardEl("?", true));
-      cardsEl.appendChild(cardEl("?", true));
+      // Create new player div
+      var div = document.createElement("div");
+      div.setAttribute("data-player-id", p.id);
+
+      var cls = "player";
+      if (p.folded) cls += " folded";
+      if (p.id === currentId) cls += " current-turn";
+      if (p.id === HUMAN_ID) cls += " is-human";
+      div.className = cls;
+
+      div.style.top = pos.top;
+      div.style.left = pos.left;
+
+      var label = p.display_name || p.id;
+      if (p.id === HUMAN_ID) label += " (You)";
+      var badges = "";
+      if (i === dealerIdx) badges += '<span class="badge badge-dealer">D</span>';
+      if (i === sbIdx) badges += '<span class="badge badge-sb">SB</span>';
+      if (i === bbIdx) badges += '<span class="badge badge-bb">BB</span>';
+
+      var ck = cardsKey(p);
+      div.setAttribute("data-cards", ck);
+
+      div.innerHTML =
+        '<div class="name">' + label + badges + '</div>' +
+        '<div class="stack">Stack: ' + p.stack + '</div>' +
+        '<div class="bet">Bet: ' + p.current_bet + '</div>' +
+        '<div class="cards"></div>';
+      var cardsEl = div.querySelector(".cards");
+      if (p.hole_cards && p.hole_cards.length > 0) {
+        for (var j = 0; j < p.hole_cards.length; j++) {
+          cardsEl.appendChild(cardEl(p.hole_cards[j], false));
+        }
+      } else {
+        cardsEl.appendChild(cardEl("?", true));
+        cardsEl.appendChild(cardEl("?", true));
+      }
+      container.appendChild(div);
     }
-    container.appendChild(div);
+  }
+
+  // Remove player divs no longer in the state
+  for (var pid in existingDivs) {
+    if (!usedIds[pid]) {
+      existingDivs[pid].remove();
+    }
   }
 }
 
+// Differential community card rendering — only append new cards
 function renderCommunity(codes) {
   var container = el("community-cards");
-  container.innerHTML = "";
-  for (var i = 0; i < codes.length; i++) {
-    container.appendChild(cardEl(codes[i], false));
+  var existing = container.querySelectorAll(".card-wrap");
+  var existingCodes = [];
+  for (var i = 0; i < existing.length; i++) {
+    existingCodes.push(existing[i].getAttribute("data-code") || "");
+  }
+
+  // If new codes are a strict extension of existing, just append
+  var isExtension = codes.length >= existingCodes.length;
+  if (isExtension) {
+    for (var i = 0; i < existingCodes.length; i++) {
+      if (existingCodes[i] !== codes[i]) {
+        isExtension = false;
+        break;
+      }
+    }
+  }
+
+  if (isExtension && existingCodes.length > 0) {
+    for (var i = existingCodes.length; i < codes.length; i++) {
+      container.appendChild(cardEl(codes[i], false));
+    }
+  } else {
+    container.innerHTML = "";
+    for (var i = 0; i < codes.length; i++) {
+      container.appendChild(cardEl(codes[i], false));
+    }
   }
 }
 
@@ -175,26 +337,33 @@ function renderActions(state) {
         }
       })(state.legal_actions[i]);
     }
-    // Raise controls inline (slider + confirm + all-in)
+    // Raise + All-in buttons inline with fold/check/call
     if (raiseAction) {
-      var raiseWrap = document.createElement("div");
-      raiseWrap.className = "raise-controls";
+      var minAmt = raiseAction.min_amount;
+      var maxAmt = raiseAction.max_amount;
+      var bb = (state.config && state.config.big_blind) || 10;
 
       var raiseBtn = document.createElement("button");
-      raiseBtn.textContent = "Raise...";
+      raiseBtn.textContent = "Raise";
       raiseBtn.onclick = function () {
         raiseOpen = true;
         raiseDetail.style.display = "flex";
-        raiseBtn.style.display = "none";
       };
-      raiseWrap.appendChild(raiseBtn);
+      btns.appendChild(raiseBtn);
 
+      var allinBtn = document.createElement("button");
+      allinBtn.className = "allin";
+      allinBtn.textContent = "All in (" + maxAmt + ")";
+      allinBtn.onclick = function () {
+        raiseOpen = false;
+        sendAction({ type: "raise", amount: maxAmt });
+      };
+      btns.appendChild(allinBtn);
+
+      // Raise detail row (slider + preset buttons + cancel) — shown below
       var raiseDetail = document.createElement("div");
       raiseDetail.className = "raise-detail";
       raiseDetail.style.display = "none";
-
-      var minAmt = raiseAction.min_amount;
-      var maxAmt = raiseAction.max_amount;
 
       var slider = document.createElement("input");
       slider.type = "range";
@@ -218,29 +387,40 @@ function renderActions(state) {
         sendAction({ type: "raise", amount: parseInt(slider.value, 10) });
       };
 
-      var allinBtn = document.createElement("button");
-      allinBtn.className = "allin";
-      allinBtn.textContent = "All in (" + maxAmt + ")";
-      allinBtn.onclick = function () {
-        raiseOpen = false;
-        sendAction({ type: "raise", amount: maxAmt });
-      };
+      raiseDetail.appendChild(slider);
+      raiseDetail.appendChild(amtLabel);
+      raiseDetail.appendChild(confirmBtn);
+
+      // Preset buttons: 3x BB, 5x BB — show the actual chip amount
+      var presets = [
+        { multiplier: 3, amount: bb * 3 },
+        { multiplier: 5, amount: bb * 5 }
+      ];
+      for (var pi = 0; pi < presets.length; pi++) {
+        (function (preset) {
+          var amt = preset.amount;
+          if (amt >= minAmt && amt <= maxAmt) {
+            var pb = document.createElement("button");
+            pb.className = "preset";
+            pb.textContent = amt;
+            pb.onclick = function () {
+              raiseOpen = false;
+              sendAction({ type: "raise", amount: amt });
+            };
+            raiseDetail.appendChild(pb);
+          }
+        })(presets[pi]);
+      }
 
       var cancelBtn = document.createElement("button");
       cancelBtn.textContent = "Cancel";
       cancelBtn.onclick = function () {
         raiseOpen = false;
         raiseDetail.style.display = "none";
-        raiseBtn.style.display = "";
       };
-
-      raiseDetail.appendChild(slider);
-      raiseDetail.appendChild(amtLabel);
-      raiseDetail.appendChild(confirmBtn);
-      raiseDetail.appendChild(allinBtn);
       raiseDetail.appendChild(cancelBtn);
-      raiseWrap.appendChild(raiseDetail);
-      btns.appendChild(raiseWrap);
+
+      btns.appendChild(raiseDetail);
     }
     return;
   }

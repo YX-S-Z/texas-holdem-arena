@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 
 from engine.game_state import GameConfig, Player
 from engine.game_controller import GameController
+from bots import create_bot
+from bots.random_bot import RandomBot
 from bots.openrouter_bot import OpenRouterBot, model_display_name, resolve_model
 
 
@@ -40,11 +42,16 @@ def create_game(
         starting_stack=starting_stack,
     )
 
-    # Build display names: LLM bots get a nice name, others get "Player N"
+    # Build display names: known bots get a nice name, others get "Player N"
     def _display_name(i: int) -> str:
         pid = f"player_{i}"
         if player_models and pid in player_models:
-            return model_display_name(resolve_model(player_models[pid]))
+            spec = player_models[pid]
+            if spec == "random":
+                return "Random Bot"
+            if spec == "simple":
+                return f"Player {i}"
+            return model_display_name(resolve_model(spec))
         return f"Player {i}"
 
     players = [
@@ -67,8 +74,8 @@ def create_game(
     bots: Dict[str, Any] = {}
 
     if player_models:
-        for pid, model_alias in player_models.items():
-            bots[pid] = OpenRouterBot(api_key=api_key, model=model_alias)
+        for pid, spec in player_models.items():
+            bots[pid] = create_bot(spec, api_key=api_key)
     elif bot_player_ids:
         # Legacy simple bots (None = rule-based)
         for pid in bot_player_ids:
@@ -134,12 +141,11 @@ def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
 
     bot = bots[p.id]
 
-    if isinstance(bot, OpenRouterBot):
-        # Get the state from this bot's perspective and ask the LLM
+    if isinstance(bot, (OpenRouterBot, RandomBot)):
         state = game.get_state(viewer_id=p.id)
         action = bot.decide(state, p.id)
     else:
-        # Simple rule-based fallback (None bot)
+        # None → simple rule-based fallback
         action = _simple_action(legal)
 
     game.apply_action(p.id, action)

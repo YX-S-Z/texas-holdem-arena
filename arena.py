@@ -163,14 +163,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Players:
-  "human"  — controlled by you in the browser (always player_0)
-  model    — one of: {', '.join(known_aliases)}
-             or any full OpenRouter model ID (e.g. anthropic/claude-sonnet-4-6)
+  "human"   — controlled by you in the browser (always player_0)
+  "random"  — picks a random legal action (no API key needed)
+  "simple"  — always checks/calls, never raises (no API key needed)
+  model     — LLM via OpenRouter; one of: {', '.join(known_aliases)}
+              or any full OpenRouter model ID (e.g. anthropic/claude-sonnet-4-6)
 
-Examples:
-  python arena.py --players human claude gpt-4o
-  python arena.py --players claude gpt-4o gemini llama --hands 20
-  python arena.py --players human claude --big-blind 20 --starting-stack 1000
+Examples (no API key):
+  python arena.py --players human random random
+  python arena.py --players random random random random --hands 20
+
+Examples (with API key):
+  python arena.py --key sk-or-... --players human claude gpt-4o
+  python arena.py --key sk-or-... --players claude gpt-4o gemini llama
+  python arena.py --key sk-or-... --players human claude --big-blind 20
 """,
     )
     parser.add_argument(
@@ -219,32 +225,38 @@ def main() -> None:
     if players.count("human") > 1:
         parser.error('Only one "human" seat is allowed.')
 
-    if not args.key:
-        if spectator or any(p != "human" for p in players):
-            parser.error(
-                "An API key is required for LLM bots. "
-                "Pass --key or set the API_KEY environment variable."
-            )
+    llm_players = [p for p in players if p not in ("human", "random", "simple")]
+    if not args.key and llm_players:
+        parser.error(
+            "An API key is required for LLM bots. "
+            "Pass --key or set the API_KEY environment variable.\n"
+            "To run without a key, use only 'random' or 'simple' bots:\n"
+            "  python arena.py --players random random random"
+        )
 
     # --- Set API key in environment so the server can read it ---
     if args.key:
         os.environ["API_KEY"] = args.key
 
     # --- Build player_models map ---
+    # random/simple are passed as-is; LLM aliases are left un-resolved here
+    # (game_session calls resolve_model internally via create_bot)
     player_models: dict = {}
     for i, spec in enumerate(players):
         if spec != "human":
-            player_models[f"player_{i}"] = resolve_model(spec)
+            player_models[f"player_{i}"] = spec
 
     # --- Print plan ---
+    from bots.openrouter_bot import model_display_name
     print("Texas Hold'em Arena")
     print("=" * 40)
     for i, spec in enumerate(players):
         if spec == "human":
             label = "YOU (human)"
+        elif spec in ("random", "simple"):
+            label = spec.title() + " Bot (no API key needed)"
         else:
-            from bots.openrouter_bot import model_display_name
-            label = model_display_name(resolve_model(spec))
+            label = f"{model_display_name(resolve_model(spec))}  [{resolve_model(spec)}]"
         print(f"  player_{i}: {label}")
     print(f"\nBlinds: {args.small_blind}/{args.big_blind}  "
           f"Stack: {args.starting_stack}")

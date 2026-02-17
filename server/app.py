@@ -16,7 +16,6 @@ from engine.game_controller import GameController
 from .game_session import (
     create_game,
     get_game,
-    get_bot_ids,
     is_bot_turn,
     apply_bot_action,
     next_hand,
@@ -35,6 +34,7 @@ class CreateGameBody(BaseModel):
     big_blind: int = 10
     starting_stack: int = 1000
     bot_player_ids: Optional[list] = None
+    player_models: Optional[dict] = None  # {player_id: model_alias}
 
 
 class ActionBody(BaseModel):
@@ -52,6 +52,7 @@ def api_create_game(body: CreateGameBody):
         big_blind=body.big_blind,
         starting_stack=body.starting_stack,
         bot_player_ids=bot_ids,
+        player_models=body.player_models,
     )
     return {"game_id": game_id}
 

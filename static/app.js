@@ -5,6 +5,11 @@ let lastStateJSON = "";
 let raiseOpen = false;
 let botMoveInProgress = false;
 
+// Read URL params: ?game_id=xxx&spectator=1
+var _params = new URLSearchParams(window.location.search);
+var SPECTATOR_MODE = _params.get("spectator") === "1";
+var _initialGameId = _params.get("game_id") || null;
+
 function el(id) {
   return document.getElementById(id);
 }
@@ -425,10 +430,16 @@ function renderActions(state) {
     return;
   }
 
-  // Bot's turn: auto-trigger after a brief delay so the user can see who is acting
-  if (state.current_player_id != null && !isMyTurn) {
+  // Bot's turn: auto-trigger after a brief delay so the user can see who is acting.
+  // In spectator mode the arena.py polling loop drives all moves instead.
+  if (state.current_player_id != null && !isMyTurn && !SPECTATOR_MODE) {
     msg.textContent = state.current_player_id + " is thinking...";
     setTimeout(triggerBotMove, 500);
+    return;
+  }
+
+  if (state.current_player_id != null && !isMyTurn && SPECTATOR_MODE) {
+    msg.textContent = state.current_player_id + " is thinking...";
     return;
   }
 
@@ -509,6 +520,14 @@ function newGame() {
 }
 
 el("btn-new-game").onclick = newGame;
+
+// Auto-connect to a game passed via ?game_id= URL param (used by arena.py)
+if (_initialGameId) {
+  gameId = _initialGameId;
+  el("game-id").textContent = "Game: " + gameId;
+  el("message").textContent = SPECTATOR_MODE ? "Watching..." : "Create or join a game to play.";
+  fetchState();
+}
 
 // Poll state to keep display in sync; only re-renders if state actually changed
 setInterval(fetchState, 2000);

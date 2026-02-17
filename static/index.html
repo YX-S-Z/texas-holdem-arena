@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Texas Hold'em Arena</title>
+  <link rel="stylesheet" href="/static/style.css?v=3" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Texas Hold'em Arena</h1>
+      <div id="controls">
+        <label for="num-players">Players:</label>
+        <select id="num-players">
+          <option value="2" selected>2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+          <option value="8">8</option>
+        </select>
+        <button id="btn-new-game">New game</button>
+        <span id="game-id"></span>
+      </div>
+    </header>
+    <div id="table-container">
+      <div id="table">
+        <div id="community-cards"></div>
+        <div id="pot">Pot: 0</div>
+        <div id="players"></div>
+      </div>
+      <div id="actions">
+        <p id="message">Create or join a game to play.</p>
+        <div id="action-buttons"></div>
+      </div>
+    </div>
+  </div>
+  <script src="/static/app.js?v=3"></script>
+</body>
+</html>

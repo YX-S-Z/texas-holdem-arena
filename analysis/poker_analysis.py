@@ -321,6 +321,12 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
 
         win_rate = hands_won / hands_seen * 100 if hands_seen > 0 else 0.0
 
+        # Final chip count: last recorded stack in actions (best available proxy).
+        # The stack column stores chips before the action, so the last row is the
+        # player's stack entering their final action of the game.
+        last_stack_series = pd.to_numeric(pa["stack"], errors="coerce").dropna()
+        final_chips = int(last_stack_series.iloc[-1]) if len(last_stack_series) > 0 else 0
+
         records.append({
             "player_id":        player_id,
             "display_name":     name,
@@ -344,6 +350,7 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
             "avg_chen_enter":   round(avg_chen_enter, 2) if pd.notna(avg_chen_enter) else float("nan"),
             "avg_chen_fold":    round(avg_chen_fold,  2) if pd.notna(avg_chen_fold)  else float("nan"),
             "chips_won":        chips_won,
+            "final_chips":      final_chips,
             "hands_won":        hands_won,
             "win_rate_pct":     round(win_rate, 1),
         })
@@ -540,33 +547,46 @@ def plot_aggression_scatter(metrics: pd.DataFrame, out: Path):
 
 
 def plot_performance_ranking(metrics: pd.DataFrame, out: Path):
-    """Horizontal bar chart of chips won (gross, from pot winnings)."""
+    """
+    Grouped horizontal bar chart showing final chip count and chips won per player,
+    sorted by final chips descending (winner at top).
+    """
     if not MATPLOTLIB_AVAILABLE:
         return
 
-    df = metrics.sort_values("chips_won", ascending=True)
-    colors = ["#2196F3" if x >= 0 else "#EF5350" for x in df["chips_won"]]
+    # Sort winner-first (descending final chips), then reverse for barh (bottom-to-top)
+    df = metrics.sort_values("final_chips", ascending=True)
+    names  = df["display_name"].tolist()
+    y      = np.arange(len(df))
+    height = 0.38
 
-    fig, ax = plt.subplots(figsize=(10, max(4, len(df) * 0.7)))
-    bars = ax.barh(df["display_name"], df["chips_won"], color=colors,
-                   edgecolor="white", height=0.55)
+    fig, ax = plt.subplots(figsize=(12, max(4, len(df) * 0.8)))
 
-    for bar, val in zip(bars, df["chips_won"]):
-        w = bar.get_width()
-        ax.text(
-            w + 8 if w >= 0 else w - 8,
-            bar.get_y() + bar.get_height() / 2,
-            f"{val:,.0f}",
-            va="center", ha="left" if w >= 0 else "right",
-            fontsize=9, fontweight="bold",
-        )
+    # Final chips bar (primary)
+    bars_final = ax.barh(y + height / 2, df["final_chips"], height=height,
+                         color="#2196F3", label="Final chips", edgecolor="white")
+    # Chips won bar (secondary, lighter)
+    bars_won = ax.barh(y - height / 2, df["chips_won"], height=height,
+                       color="#FF7043", label="Chips won from pots", edgecolor="white", alpha=0.85)
 
-    ax.axvline(0, color="#555", linewidth=1.2)
-    ax.set_xlabel("Total Chips Won from Pots", fontsize=11)
-    ax.set_title("Performance Ranking — Chips Won", fontsize=14, fontweight="bold")
-    low = min(df["chips_won"].min() * 1.25, -30)
-    high = max(df["chips_won"].max() * 1.25, 30)
-    ax.set_xlim(low, high)
+    # Labels on final chips bars
+    for bar, val in zip(bars_final, df["final_chips"]):
+        ax.text(bar.get_width() + 15, bar.get_y() + bar.get_height() / 2,
+                f"{int(val):,}", va="center", fontsize=8.5, fontweight="bold", color="#ddd")
+
+    # Labels on chips-won bars
+    for bar, val in zip(bars_won, df["chips_won"]):
+        ax.text(bar.get_width() + 15, bar.get_y() + bar.get_height() / 2,
+                f"{int(val):,}", va="center", fontsize=8, color="#aaa")
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(names, fontsize=9)
+    ax.set_xlabel("Chips", fontsize=11)
+    ax.set_title("Performance Ranking — Final Chips & Chips Won\n(sorted by final chip count, winner first)",
+                 fontsize=13, fontweight="bold")
+    ax.legend(loc="lower right", fontsize=9)
+    xmax = max(df["final_chips"].max(), df["chips_won"].max()) * 1.2
+    ax.set_xlim(0, max(xmax, 100))
     ax.invert_yaxis()
     plt.tight_layout()
     plt.savefig(out / "performance_ranking.png", dpi=150)
@@ -798,7 +818,7 @@ def generate_report(
     n_actions  = len(actions)
     n_players  = len(metrics)
 
-    ranked = metrics.sort_values("chips_won", ascending=False)
+    ranked = metrics.sort_values("final_chips", ascending=False)
 
     lines = [
         "# Texas Hold'em LLM Arena — Analysis Report",
@@ -819,18 +839,18 @@ def generate_report(
         "",
         "## Performance Ranking",
         "",
-        "Ranked by total chips won from pots (gross). "
-        "Note: chips won reflects pot winnings; net profit also depends on "
-        "chips invested per hand.",
+        "Sorted by **final chip count** (winner first). "
+        "Chips won = gross pot winnings; final chips = stack remaining at end of game.",
         "",
-        "| Rank | Player | Chips Won | Hands Won | Win Rate | Archetype |",
-        "|------|--------|-----------|-----------|----------|-----------|",
+        "| Rank | Player | Final Chips | Chips Won | Hands Won | Win Rate | Archetype |",
+        "|------|--------|-------------|-----------|-----------|----------|-----------|",
     ]
 
     for rank, (pid, row) in enumerate(ranked.iterrows(), 1):
         personality, _ = classify_personality(row)
         lines.append(
-            f"| {rank} | **{row['display_name']}** | {row['chips_won']:,.0f} | "
+            f"| {rank} | **{row['display_name']}** | {int(row['final_chips']):,} | "
+            f"{row['chips_won']:,.0f} | "
             f"{row['hands_won']} | {row['win_rate_pct']}% | {personality} |"
         )
 
@@ -1108,14 +1128,14 @@ def main():
 
     # ── Console summary ──────────────────────────────────────────────────────
     print("PERFORMANCE RANKING")
-    print(f"  {'Rank':<5} {'Player':<22} {'Chips Won':>10} {'W/L':>6} {'Style':<6}")
-    print(f"  {'-'*5} {'-'*22} {'-'*10} {'-'*6} {'-'*6}")
-    ranked = metrics.sort_values("chips_won", ascending=False)
+    print(f"  {'Rank':<5} {'Player':<22} {'Final Chips':>12} {'Chips Won':>10} {'W/L':>6}  Style")
+    print(f"  {'-'*5} {'-'*22} {'-'*12} {'-'*10} {'-'*6}  -----")
+    ranked = metrics.sort_values("final_chips", ascending=False)
     for i, (pid, row) in enumerate(ranked.iterrows(), 1):
         wl = f"{row['hands_won']}/{int(row['hands_seen'])}"
         print(
-            f"  {i:<5} {row['display_name']:<22} {row['chips_won']:>10,.0f} "
-            f"{wl:>6}  [{row['personality']}]"
+            f"  {i:<5} {row['display_name']:<22} {int(row['final_chips']):>12,} "
+            f"{row['chips_won']:>10,.0f} {wl:>6}  [{row['personality']}]"
         )
     print()
 

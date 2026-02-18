@@ -285,11 +285,17 @@ function renderPot(pot) {
 
 function renderProgress(state) {
   var container = el("tournament-progress");
-  if (!container || MAX_HANDS <= 0) return;
-  var handNum = Math.min((state.hands_played || 0) + 1, MAX_HANDS);
-  var pct = (handNum / MAX_HANDS) * 100;
-  el("progress-fill").style.width = pct + "%";
-  el("progress-label").textContent = "Hand " + handNum + " / " + MAX_HANDS;
+  // Show in arena mode always; show in any mode when MAX_HANDS is set.
+  if (!container || (!ARENA_MODE && MAX_HANDS <= 0)) return;
+  var handNum = (state.hands_played || 0) + 1;
+  if (MAX_HANDS > 0) {
+    handNum = Math.min(handNum, MAX_HANDS);
+    el("progress-fill").style.width = (handNum / MAX_HANDS * 100) + "%";
+    el("progress-label").textContent = "Hand " + handNum + " / " + MAX_HANDS;
+  } else {
+    el("progress-fill").style.width = "0%";
+    el("progress-label").textContent = "Hand " + handNum;
+  }
   container.style.display = "flex";
 }
 

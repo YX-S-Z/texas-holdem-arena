@@ -22,7 +22,7 @@ import webbrowser
 
 import requests
 
-from bots.openrouter_bot import MODEL_ALIASES, resolve_model
+from bots.openrouter_bot import MODEL_ALIASES, resolve_model, model_display_name
 
 SERVER_HOST = "127.0.0.1"
 POLL_INTERVAL = 0.5   # seconds between spectator loop ticks
@@ -68,14 +68,13 @@ def _make_display_names(players: list) -> dict:
     Build a {player_id: display_name} map from the raw player spec list.
 
     Rules:
-      - "human"  → skipped (frontend labels it "You")
+      - "human"  → skipped (frontend labels it "Human (You)")
       - "random" → "Random Bot", or "Random Bot 1/2/3..." when there are multiples
       - "simple" → "Simple Bot", or "Simple Bot 1/2/3..."
-      - anything else → the spec as typed, capitalising the first letter;
+      - anything else → registry display name (e.g. "claude" → "Claude Sonnet 4.6");
         if multiples share the same spec they also get numbered
     """
     from collections import Counter
-    # Count how many times each non-human spec appears
     spec_count = Counter(s for s in players if s != "human")
 
     seen: Counter = Counter()
@@ -92,9 +91,9 @@ def _make_display_names(players: list) -> dict:
         elif spec == "simple":
             base_name = "Simple Bot"
         else:
-            # Use the spec as-is. Only capitalise the first character when
-            # it starts with a plain lowercase letter (not a digit or symbol).
-            base_name = (spec[0].upper() + spec[1:]) if spec and spec[0].isalpha() else spec
+            # Look up the registry display name (e.g. "claude" → "Claude Sonnet 4.6").
+            # Falls back gracefully for raw model IDs not in the registry.
+            base_name = model_display_name(resolve_model(spec))
 
         names[pid] = f"{base_name} {seen[spec]}" if total > 1 else base_name
 

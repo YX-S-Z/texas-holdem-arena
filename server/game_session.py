@@ -1,6 +1,7 @@
 """In-memory game sessions: one GameController per game_id."""
 
 import os
+import threading
 from typing import Any, Dict, List, Optional
 
 from engine.game_state import GameConfig, Player
@@ -10,12 +11,19 @@ from bots.random_bot import RandomBot
 from bots.openrouter_bot import OpenRouterBot, model_display_name, resolve_model
 
 
-# game_id -> (controller, bots)
-# bots: dict[player_id -> OpenRouterBot | None]
-#   OpenRouterBot  → LLM-backed bot
-#   None           → simple rule-based bot (legacy / "New game" button)
-#   key absent     → human player
-_sessions: Dict[str, tuple] = {}
+# game_id -> {"controller": ..., "bots": ..., "last_action": ...}
+_sessions: Dict[str, Dict[str, Any]] = {}
+
+# Per-game locks to prevent concurrent bot_move calls on the same game
+_game_locks: Dict[str, threading.Lock] = {}
+_game_locks_mutex = threading.Lock()
+
+
+def _get_game_lock(game_id: str) -> threading.Lock:
+    with _game_locks_mutex:
+        if game_id not in _game_locks:
+            _game_locks[game_id] = threading.Lock()
+        return _game_locks[game_id]
 
 
 def create_game(
@@ -26,25 +34,18 @@ def create_game(
     starting_stack: int = 1000,
     bot_player_ids: Optional[List[str]] = None,
     player_models: Optional[Dict[str, str]] = None,
+    player_names: Optional[Dict[str, str]] = None,
 ) -> str:
-    """
-    Create and start a new game.
-
-    player_models: maps player_id -> model alias or full model ID.
-                   When provided, those players become LLM bots.
-                   Any player_id not in player_models and not in
-                   bot_player_ids is treated as a human.
-    bot_player_ids: legacy simple-bot list (used by the browser's New Game button).
-    """
     config = GameConfig(
         small_blind=small_blind,
         big_blind=big_blind,
         starting_stack=starting_stack,
     )
 
-    # Build display names: known bots get a nice name, others get "Player N"
     def _display_name(i: int) -> str:
         pid = f"player_{i}"
+        if player_names and pid in player_names:
+            return player_names[pid]
         if player_models and pid in player_models:
             spec = player_models[pid]
             if spec == "random":
@@ -69,7 +70,6 @@ def create_game(
 
     gid = game_id or f"game_{len(_sessions)}"
 
-    # Build bots dict
     api_key = os.environ.get("API_KEY", "")
     bots: Dict[str, Any] = {}
 
@@ -77,22 +77,94 @@ def create_game(
         for pid, spec in player_models.items():
             bots[pid] = create_bot(spec, api_key=api_key)
     elif bot_player_ids:
-        # Legacy simple bots (None = rule-based)
         for pid in bot_player_ids:
             bots[pid] = None
 
-    _sessions[gid] = (controller, bots)
+    _sessions[gid] = {
+        "controller": controller,
+        "bots": bots,
+        "last_action": None,   # populated by apply_bot_action
+        "hands_played": 0,     # number of completed hands (incremented on next_hand)
+        "bust_order": [],      # [{player_id, display_name, hand_number}] in bust order
+        "failure_stats": {},   # {player_id: {total_moves, timeout, parse_error, api_error}}
+        "creation_config": {   # stored so the game can be cloned
+            "num_players": num_players,
+            "small_blind": small_blind,
+            "big_blind": big_blind,
+            "starting_stack": starting_stack,
+            "bot_player_ids": bot_player_ids,
+            "player_models": player_models,
+            "player_names": player_names,
+        },
+    }
     return gid
 
 
 def get_game(game_id: str) -> Optional[GameController]:
-    t = _sessions.get(game_id)
-    return t[0] if t else None
+    s = _sessions.get(game_id)
+    return s["controller"] if s else None
 
 
 def get_bots(game_id: str) -> Dict[str, Any]:
-    t = _sessions.get(game_id)
-    return dict(t[1]) if t else {}
+    s = _sessions.get(game_id)
+    return dict(s["bots"]) if s else {}
+
+
+def get_last_action(game_id: str) -> Optional[Dict[str, Any]]:
+    s = _sessions.get(game_id)
+    return s["last_action"] if s else None
+
+
+def _update_bust_order(session: Dict[str, Any]) -> None:
+    """Check for any newly 0-chip players and record them in bust_order."""
+    bust_order = session["bust_order"]
+    already_busted = {entry["player_id"] for entry in bust_order}
+    hand_num = session["hands_played"]
+    # Use the public get_state() API to read player stacks
+    state = session["controller"].get_state()
+    for p in state.get("players", []):
+        if p["stack"] == 0 and p["id"] not in already_busted:
+            bust_order.append({
+                "player_id": p["id"],
+                "display_name": p.get("display_name", p["id"]),
+                "hand_number": hand_num,
+            })
+
+
+def get_hands_played(game_id: str) -> int:
+    s = _sessions.get(game_id)
+    return s["hands_played"] if s else 0
+
+
+def get_bust_order(game_id: str) -> List[Dict[str, Any]]:
+    """Return bust_order, lazily updating it first to catch the latest busts."""
+    s = _sessions.get(game_id)
+    if not s:
+        return []
+    _update_bust_order(s)
+    return list(s["bust_order"])
+
+
+def _record_move(session: Dict[str, Any], player_id: str,
+                 failure_reason: Optional[str] = None) -> None:
+    """Increment total_moves (and the failure counter if applicable) for a player."""
+    stats = session["failure_stats"]
+    if player_id not in stats:
+        stats[player_id] = {
+            "total_moves": 0,
+            "timeout": 0,
+            "parse_error": 0,           # both primary + guardrail failed → fallback used
+            "parse_error_rescued": 0,   # primary failed but guardrail saved the action
+            "api_error": 0,
+        }
+    stats[player_id]["total_moves"] += 1
+    if failure_reason and failure_reason in stats[player_id]:
+        stats[player_id][failure_reason] += 1
+
+
+def get_failure_stats(game_id: str) -> Dict[str, Any]:
+    s = _sessions.get(game_id)
+    return dict(s["failure_stats"]) if s else {}
 
 
 def is_bot_turn(game_id: str) -> bool:
@@ -107,53 +179,113 @@ def is_bot_turn(game_id: str) -> bool:
 
 
 def next_hand(game_id: str) -> bool:
-    """Start the next hand in the same game. Returns True if started."""
-    game = get_game(game_id)
-    if not game:
+    """Start the next hand. Updates bust tracking and increments hands_played."""
+    s = _sessions.get(game_id)
+    if not s:
         return False
-    game.start_hand()
+    _update_bust_order(s)          # capture any busts before starting next hand
+    s["hands_played"] += 1
+    s["controller"].start_hand()
+    s["last_action"] = None
     return True
 
 
 def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
     """
-    If the current player is a bot, apply one action and return it.
-    - OpenRouterBot: asks the LLM
-    - None (simple bot): prefer check/call, then fold
+    If the current player is a bot, apply one action and return a summary dict:
+      {"player_id", "display_name", "action", "thinking"}
+    Returns None if the current player is not a bot or if another bot_move is
+    already in flight for this game (prevents the 'Cannot act now' race condition).
     """
-    game = get_game(game_id)
-    if not game:
-        return None
-    seat = game._current_player_seat
-    if seat is None:
-        return None
-    p = game._player_by_seat(seat)
-    if not p:
+    s = _sessions.get(game_id)
+    if not s:
         return None
 
-    bots = get_bots(game_id)
-    if p.id not in bots:
-        return None  # human player
-
-    legal = game.get_legal_actions(p.id)
-    if not legal:
+    # Non-blocking acquire: if another thread is already processing a bot move
+    # for this game, skip rather than double-apply.
+    lock = _get_game_lock(game_id)
+    if not lock.acquire(blocking=False):
         return None
 
-    bot = bots[p.id]
+    try:
+        game: GameController = s["controller"]
 
-    if isinstance(bot, (OpenRouterBot, RandomBot)):
-        state = game.get_state(viewer_id=p.id)
-        action = bot.decide(state, p.id)
-    else:
-        # None → simple rule-based fallback
-        action = _simple_action(legal)
+        seat = game._current_player_seat
+        if seat is None:
+            return None
+        p = game._player_by_seat(seat)
+        if not p:
+            return None
 
-    game.apply_action(p.id, action)
-    return action
+        bots = s["bots"]
+        if p.id not in bots:
+            return None  # human player
+
+        legal = game.get_legal_actions(p.id)
+        if not legal:
+            return None
+
+        bot = bots[p.id]
+        thinking: Optional[str] = None
+        failure_reason: Optional[str] = None
+        raw_response: Optional[str] = None
+
+        if isinstance(bot, OpenRouterBot):
+            state = game.get_state(viewer_id=p.id)
+            action = bot.decide(state, p.id)
+            thinking = getattr(bot, "last_thinking", None)
+            failure_reason = getattr(bot, "last_failure_reason", None)
+            raw_response = getattr(bot, "last_raw_response", None)
+        elif isinstance(bot, RandomBot):
+            state = game.get_state(viewer_id=p.id)
+            action = bot.decide(state, p.id)
+        else:
+            action = _simple_action(legal)
+
+        try:
+            game.apply_action(p.id, action)
+        except ValueError:
+            # Race condition: game state changed while the LLM was thinking
+            # (e.g. arena.py timed out and retried; the first call finally arrived).
+            return None
+
+        _record_move(s, p.id, failure_reason)
+
+        # Format a human-readable action label
+        atype = action.get("type", "?")
+        if atype == "raise":
+            action_label = f"raise to {action.get('amount')}"
+        elif atype == "call":
+            action_label = f"call {action.get('amount')}"
+        else:
+            action_label = atype
+
+        summary = {
+            "player_id": p.id,
+            "display_name": p.display_name or p.id,
+            "action_label": action_label,
+            "thinking": thinking,
+            "failure_reason": failure_reason,  # None = success; else "timeout"/"parse_error"/"api_error"
+            "raw_response": raw_response if failure_reason else None,  # only include on failures to save bandwidth
+        }
+        s["last_action"] = summary
+        return summary
+    finally:
+        lock.release()
+
+
+def clone_game(game_id: str) -> Optional[str]:
+    """Create a new game with the same configuration as an existing game."""
+    s = _sessions.get(game_id)
+    if not s:
+        return None
+    cfg = s.get("creation_config")
+    if not cfg:
+        return None
+    return create_game(**cfg)
 
 
 def _simple_action(legal: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Prefer check > call > fold."""
     types = {a["type"]: a for a in legal}
     if "check" in types:
         return {"type": "check"}

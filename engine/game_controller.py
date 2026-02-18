@@ -299,12 +299,13 @@ class GameController:
     def get_state(self, viewer_id: Optional[str] = None) -> Dict[str, Any]:
         """Serializable state for API. Partial visibility: pass the player who is viewing.
 
+        - When viewer_id is None, all players' hole cards are visible (spectator/debug view).
         - When viewer_id is set, only that player's hole_cards are included; others get [].
-        - At showdown/hand_over, all players' hole cards are shown.
+        - At showdown/hand_over, all players' hole cards are shown regardless.
         """
         show_down = self._phase in (PHASE_SHOWDOWN, PHASE_HAND_OVER)
         players_out = [
-            p.to_public_dict(show_hole_cards=(show_down or (viewer_id is not None and p.id == viewer_id)))
+            p.to_public_dict(show_hole_cards=(show_down or viewer_id is None or p.id == viewer_id))
             for p in sorted(self.players, key=lambda x: x.seat)
         ]
         current_player = self._player_by_seat(self._current_player_seat) if self._current_player_seat is not None else None

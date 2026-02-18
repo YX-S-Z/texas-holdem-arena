@@ -5,10 +5,16 @@ let lastStateJSON = "";
 let raiseOpen = false;
 let botMoveInProgress = false;
 
-// Read URL params: ?game_id=xxx&spectator=1
+// Thinking-panel/log dedup keys
+let lastThinkingKey = null;
+let lastLogKey = null;
+
+// Read URL params: ?game_id=xxx&spectator=1&arena=1&hands=N
 var _params = new URLSearchParams(window.location.search);
 var SPECTATOR_MODE = _params.get("spectator") === "1";
+var ARENA_MODE    = _params.get("arena")     === "1";
 var _initialGameId = _params.get("game_id") || null;
+var MAX_HANDS = parseInt(_params.get("hands") || "0", 10);
 
 function el(id) {
   return document.getElementById(id);
@@ -19,12 +25,23 @@ function clearGame() {
   lastStateJSON = "";
   raiseOpen = false;
   botMoveInProgress = false;
+  lastThinkingKey = null;
   el("game-id").textContent = "";
   el("players").innerHTML = "";
   el("community-cards").innerHTML = "";
   el("pot").textContent = "Pot: 0";
   el("message").textContent = "Game ended or server restarted. Click New game to play.";
   el("action-buttons").innerHTML = "";
+  var modal = el("game-summary-modal");
+  if (modal) modal.style.display = "none";
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function cardEl(code, hidden) {
@@ -146,7 +163,7 @@ function renderPlayers(state) {
 
       // Update name + badges
       var label = p.display_name || p.id;
-      if (p.id === HUMAN_ID) label += " (You)";
+      if (!SPECTATOR_MODE && p.id === HUMAN_ID) label += " (You)";
       var badges = "";
       if (i === dealerIdx) badges += '<span class="badge badge-dealer">D</span>';
       if (i === sbIdx) badges += '<span class="badge badge-sb">SB</span>';
@@ -195,7 +212,7 @@ function renderPlayers(state) {
       div.style.left = pos.left;
 
       var label = p.display_name || p.id;
-      if (p.id === HUMAN_ID) label += " (You)";
+      if (!SPECTATOR_MODE && p.id === HUMAN_ID) label += " (You)";
       var badges = "";
       if (i === dealerIdx) badges += '<span class="badge badge-dealer">D</span>';
       if (i === sbIdx) badges += '<span class="badge badge-sb">SB</span>';
@@ -266,6 +283,210 @@ function renderPot(pot) {
   el("pot").textContent = "Pot: " + pot;
 }
 
+// ── Game-over summary ─────────────────────────────────────────────────────────
+
+function shouldShowSummary(state) {
+  var phase = state.phase;
+  if (phase !== "hand_over" && phase !== "showdown") return false;
+  // Arena.py explicitly flagged the session as finished
+  if (state.arena_finished) return true;
+  // Natural end: only 1 player has chips (works outside arena mode too)
+  var active = (state.players || []).filter(function(p) { return p.stack > 0; });
+  if (active.length <= 1 && (state.players || []).length > 1) return true;
+  return false;
+}
+
+function computeRankings(players, bustOrder) {
+  var bustMap = {};
+  for (var i = 0; i < bustOrder.length; i++) {
+    bustMap[bustOrder[i].player_id] = bustOrder[i];
+  }
+
+  var alive  = players.filter(function(p) { return p.stack > 0; });
+  var busted = players.filter(function(p) { return p.stack <= 0; });
+
+  // Alive: most chips = best rank
+  alive.sort(function(a, b) { return b.stack - a.stack; });
+
+  // Busted: later bust = better rank (sort by hand_number descending)
+  busted.sort(function(a, b) {
+    var ha = bustMap[a.id] ? bustMap[a.id].hand_number : -1;
+    var hb = bustMap[b.id] ? bustMap[b.id].hand_number : -1;
+    return hb - ha;
+  });
+
+  var maxStack = alive.length > 0 ? alive[0].stack : 1;
+  var ranked = [];
+
+  alive.forEach(function(p, i) {
+    ranked.push({ rank: i + 1, type: "alive", player: p, maxStack: maxStack });
+  });
+  busted.forEach(function(p, i) {
+    var info = bustMap[p.id];
+    ranked.push({
+      rank: alive.length + i + 1,
+      type: "busted",
+      player: p,
+      hand_number: info ? info.hand_number + 1 : "?",  // 1-indexed display
+    });
+  });
+  return ranked;
+}
+
+function renderSummary(state) {
+  var modal = el("game-summary-modal");
+  if (!modal) return;
+
+  var ranked      = computeRankings(state.players || [], state.bust_order || []);
+  var handsPlayed = (state.hands_played || 0) + 1;  // +1: first hand isn't counted by next_hand()
+  var failStats   = state.failure_stats || {};
+  var medals      = ["🥇", "🥈", "🥉"];
+
+  var html = '<div class="summary-card">';
+  html += '<h2 class="summary-title">🏆 Game Over</h2>';
+  html += '<p class="summary-subtitle">Final results &mdash; ' + handsPlayed + ' hand' + (handsPlayed !== 1 ? "s" : "") + ' played</p>';
+  html += '<div class="summary-rankings">';
+
+  ranked.forEach(function(r) {
+    var medal = medals[r.rank - 1] || ("#" + r.rank);
+    var name  = r.player.display_name || r.player.id;
+    var pf    = failStats[r.player.id] || {};
+    var totalMoves   = pf.total_moves || 0;
+    var totalFails   = (pf.timeout || 0) + (pf.parse_error || 0) + (pf.parse_error_rescued || 0) + (pf.api_error || 0);
+
+    html += '<div class="summary-row rank-' + r.rank + '">';
+    html += '<span class="summary-medal">' + medal + '</span>';
+    html += '<span class="summary-name">' + escapeHtml(name) + '</span>';
+    if (r.type === "alive") {
+      html += '<span class="summary-chips">' + r.player.stack.toLocaleString() + ' chips</span>';
+    } else {
+      html += '<span class="summary-bust">busted (hand ' + r.hand_number + ')</span>';
+    }
+    html += '</div>';
+
+    // Failure stats line (only show when there's move data to report)
+    if (totalMoves > 0) {
+      var failCls = totalFails > 0 ? " has-failures" : "";
+      html += '<div class="summary-failures' + failCls + '">';
+      if (totalFails === 0) {
+        html += '✓ ' + totalMoves + ' moves &mdash; 0 failures';
+      } else {
+        var pct = Math.round(totalFails / totalMoves * 100);
+        var parts = [];
+        if (pf.timeout)               parts.push(pf.timeout + ' timeout' + (pf.timeout > 1 ? 's' : ''));
+        if (pf.parse_error)           parts.push(pf.parse_error + ' parse error' + (pf.parse_error > 1 ? 's' : '') + ' (fallback)');
+        if (pf.parse_error_rescued)   parts.push(pf.parse_error_rescued + ' parse error' + (pf.parse_error_rescued > 1 ? 's' : '') + ' (guardrail ✓)');
+        if (pf.api_error)             parts.push(pf.api_error + ' api error' + (pf.api_error > 1 ? 's' : ''));
+        html += totalFails + '/' + totalMoves + ' moves failed (' + pct + '%) &mdash; ' + parts.join(', ');
+      }
+      html += '</div>';
+    }
+  });
+
+  html += '</div>';  // .summary-rankings
+  html += '<div class="summary-buttons">';
+  if (ARENA_MODE && !SPECTATOR_MODE) {
+    html += '<button class="primary" id="summary-play-again">Play Again</button>';
+  }
+  html += '<button id="summary-close">Close</button>';
+  html += '</div>';
+  html += '</div>';  // .summary-card
+
+  modal.innerHTML = html;
+  modal.style.display = "flex";
+
+  // Tell arena.py the leaderboard is now visible so it can exit cleanly.
+  if (ARENA_MODE && SPECTATOR_MODE) {
+    fetch(API + "/arena/ack_summary", { method: "POST" }).catch(function(){});
+  }
+
+  var playAgainBtn = el("summary-play-again");
+  if (playAgainBtn) {
+    playAgainBtn.onclick = function() {
+      modal.style.display = "none";
+      el("btn-new-game").click();
+    };
+  }
+  el("summary-close").onclick = function() { modal.style.display = "none"; };
+}
+
+// ── End summary ───────────────────────────────────────────────────────────────
+
+var _FAILURE_LABELS = {
+  "timeout":               "⏱ timeout",
+  "parse_error":           "⚠ parse error",
+  "parse_error_rescued":   "⚠ parse error [guardrail ✓]",
+  "api_error":             "✗ api error",
+};
+
+var _FAILURE_CLASSES = {
+  "timeout":               "failure-timeout",
+  "parse_error":           "failure-parse-error",
+  "parse_error_rescued":   "failure-parse-rescued",
+  "api_error":             "failure-api-error",
+};
+
+function _thinkingKey(lastAction) {
+  return (lastAction.player_id || "") + "|" +
+         (lastAction.action_label || "") + "|" +
+         (lastAction.thinking || "") + "|" +
+         (lastAction.failure_reason || "");
+}
+
+function _failureBadgeHtml(failureReason) {
+  if (!failureReason) return "";
+  var label = _FAILURE_LABELS[failureReason] || failureReason;
+  var cls   = _FAILURE_CLASSES[failureReason] || "";
+  return '<span class="thinking-failure-badge ' + cls + '">' + label + '</span>';
+}
+
+function _buildThinkingHtml(lastAction) {
+  var name = lastAction.display_name || lastAction.player_id || "Bot";
+  var thinking = lastAction.thinking || "";
+  var actionLabel = lastAction.action_label || "";
+  var failure = lastAction.failure_reason || null;
+
+  var html = '<span class="thinking-name">' + escapeHtml(name) + ':</span>';
+  html += _failureBadgeHtml(failure);
+  if (thinking) {
+    html += ' <span class="thinking-text">' + escapeHtml(thinking) + '</span>';
+  }
+  if (actionLabel) {
+    // Only mark "(fallback)" for true fallbacks; guardrail-rescued actions are real.
+    var isTrueFallback = failure && failure !== "parse_error_rescued";
+    var label = isTrueFallback ? actionLabel + " (fallback)" : actionLabel;
+    html += '<span class="thinking-action"> → ' + escapeHtml(label) + '</span>';
+  }
+  return html;
+}
+
+function renderThinking(lastAction) {
+  if (!lastAction) return;  // keep old content visible; never hide between turns
+  var key = _thinkingKey(lastAction);
+  if (key === lastThinkingKey) return;  // same action, skip re-render
+  lastThinkingKey = key;
+
+  var panel = el("thinking-panel");
+  panel.innerHTML = _buildThinkingHtml(lastAction);
+  panel.style.display = "block";
+
+  appendToThinkingLog(lastAction, key);
+}
+
+function appendToThinkingLog(lastAction, key) {
+  if (!key) key = _thinkingKey(lastAction);
+  if (key === lastLogKey) return;  // already logged
+  lastLogKey = key;
+
+  var entry = document.createElement("div");
+  entry.className = "thinking-log-entry";
+  entry.innerHTML = _buildThinkingHtml(lastAction);
+
+  var log = el("thinking-log");
+  log.appendChild(entry);
+  log.scrollTop = log.scrollHeight;
+}
+
 function triggerBotMove() {
   if (botMoveInProgress || !gameId) return;
   botMoveInProgress = true;
@@ -297,25 +518,27 @@ function renderActions(state) {
     } else {
       msg.textContent = "Hand over.";
     }
-    var nextBtn = document.createElement("button");
-    nextBtn.textContent = "Next hand";
-    nextBtn.onclick = function () {
-      if (!gameId) return;
-      fetch(API + "/games/" + gameId + "/next_hand?viewer_id=" + HUMAN_ID, { method: "POST" })
-        .then(function (r) {
-          if (r.status === 404) { clearGame(); return null; }
-          return r.json();
-        })
-        .then(function (s) { if (s) renderState(s); });
-    };
-    btns.appendChild(nextBtn);
+    if (!SPECTATOR_MODE) {
+      var nextBtn = document.createElement("button");
+      nextBtn.textContent = "Next hand";
+      nextBtn.onclick = function () {
+        if (!gameId) return;
+        fetch(API + "/games/" + gameId + "/next_hand?viewer_id=" + HUMAN_ID, { method: "POST" })
+          .then(function (r) {
+            if (r.status === 404) { clearGame(); return null; }
+            return r.json();
+          })
+          .then(function (s) { if (s) renderState(s); });
+      };
+      btns.appendChild(nextBtn);
+    }
     return;
   }
 
   // Determine whose turn it is
-  var isMyTurn = (state.current_player_id === HUMAN_ID);
+  var isMyTurn = !SPECTATOR_MODE && (state.current_player_id === HUMAN_ID);
 
-  // My turn: show action buttons
+  // My turn: show action buttons (never in spectator mode)
   if (isMyTurn && state.legal_actions && state.legal_actions.length > 0) {
     msg.textContent = "Your turn.";
     var raiseAction = null;
@@ -432,14 +655,14 @@ function renderActions(state) {
 
   // Bot's turn: auto-trigger after a brief delay so the user can see who is acting.
   // In spectator mode the arena.py polling loop drives all moves instead.
-  if (state.current_player_id != null && !isMyTurn && !SPECTATOR_MODE) {
-    msg.textContent = state.current_player_id + " is thinking...";
-    setTimeout(triggerBotMove, 500);
-    return;
-  }
-
-  if (state.current_player_id != null && !isMyTurn && SPECTATOR_MODE) {
-    msg.textContent = state.current_player_id + " is thinking...";
+  if (state.current_player_id != null && !isMyTurn) {
+    var curPlayer = null;
+    for (var pi = 0; pi < (state.players || []).length; pi++) {
+      if (state.players[pi].id === state.current_player_id) { curPlayer = state.players[pi]; break; }
+    }
+    var curName = (curPlayer && curPlayer.display_name) || state.current_player_id;
+    msg.textContent = curName + " is thinking...";
+    if (!SPECTATOR_MODE) setTimeout(triggerBotMove, 500);
     return;
   }
 
@@ -452,7 +675,16 @@ function renderState(state) {
   renderPlayers(state);
   renderCommunity(state.community_cards || []);
   renderPot(state.pot || 0);
+  renderThinking(state.last_action || null);
   renderActions(state);
+
+  // Show summary overlay when the game is over (only once)
+  if (shouldShowSummary(state)) {
+    var modal = el("game-summary-modal");
+    if (modal && modal.style.display !== "flex") {
+      renderSummary(state);
+    }
+  }
 }
 
 function sendAction(action) {
@@ -474,7 +706,12 @@ function sendAction(action) {
 
 function fetchState() {
   if (!gameId) return;
-  fetch(API + "/games/" + gameId + "?viewer_id=" + HUMAN_ID)
+  // In spectator mode we don't pass viewer_id — the server then shows all
+  // players' hole cards so human spectators can follow every model's hand.
+  var stateUrl = SPECTATOR_MODE
+    ? API + "/games/" + gameId
+    : API + "/games/" + gameId + "?viewer_id=" + HUMAN_ID;
+  fetch(stateUrl)
     .then(function (r) {
       if (r.status === 404) { clearGame(); return null; }
       return r.json();
@@ -521,12 +758,51 @@ function newGame() {
 
 el("btn-new-game").onclick = newGame;
 
+// "Clear log" button
+el("btn-clear-log").onclick = function() {
+  el("thinking-log").innerHTML = "";
+  lastLogKey = null;
+};
+
 // Auto-connect to a game passed via ?game_id= URL param (used by arena.py)
 if (_initialGameId) {
   gameId = _initialGameId;
-  el("game-id").textContent = "Game: " + gameId;
+  if (!ARENA_MODE) el("game-id").textContent = "Game: " + gameId;
   el("message").textContent = SPECTATOR_MODE ? "Watching..." : "Create or join a game to play.";
   fetchState();
+}
+
+// ── Arena mode ────────────────────────────────────────────────────────────────
+// When launched via arena.py (?arena=1): hide player-count selector and
+// override "New Game" to restart the same configuration via /arena/restart.
+if (ARENA_MODE) {
+  var numLabel = document.querySelector('label[for="num-players"]');
+  var numSelect = el("num-players");
+  if (numLabel)  numLabel.style.display  = "none";
+  if (numSelect) numSelect.style.display = "none";
+
+  if (SPECTATOR_MODE) {
+    // In spectator mode arena.py drives everything — hide the new game button.
+    el("btn-new-game").style.display = "none";
+  } else {
+    // Human-vs-AI mode: restart game via /arena/restart, navigate to new game.
+    el("btn-new-game").textContent = "New game";
+    el("btn-new-game").onclick = function() {
+      var sourceId = gameId || _initialGameId;
+      if (!sourceId) { newGame(); return; }
+      fetch(API + "/arena/restart", { method: "POST" })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          el("thinking-log").innerHTML = "";
+          lastLogKey = null;
+          lastThinkingKey = null;
+          window.location.href = "/?game_id=" + data.game_id + "&arena=1";
+        })
+        .catch(function(e) {
+          el("message").textContent = "Restart failed: " + (e.message || "error");
+        });
+    };
+  }
 }
 
 // Poll state to keep display in sync; only re-renders if state actually changed

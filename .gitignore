@@ -1,3 +1,14 @@
 __pycache__/
 *.pyc
 .claude/
+
+# Environment / secrets — never commit these
+.env
+.env.local
+.env.*.local
+*.key
+secrets.txt
+
+# Personal run scripts that may contain API keys
+scripts/run_arena.sh
+scripts/run_human.sh

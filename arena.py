@@ -60,16 +60,60 @@ def _wait_for_server(port: int, timeout: int = STARTUP_TIMEOUT) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Display name derivation
+# ---------------------------------------------------------------------------
+
+def _make_display_names(players: list) -> dict:
+    """
+    Build a {player_id: display_name} map from the raw player spec list.
+
+    Rules:
+      - "human"  → skipped (frontend labels it "You")
+      - "random" → "Random Bot", or "Random Bot 1/2/3..." when there are multiples
+      - "simple" → "Simple Bot", or "Simple Bot 1/2/3..."
+      - anything else → the spec as typed, capitalising the first letter;
+        if multiples share the same spec they also get numbered
+    """
+    from collections import Counter
+    # Count how many times each non-human spec appears
+    spec_count = Counter(s for s in players if s != "human")
+
+    seen: Counter = Counter()
+    names: dict = {}
+    for i, spec in enumerate(players):
+        if spec == "human":
+            continue
+        pid = f"player_{i}"
+        seen[spec] += 1
+        total = spec_count[spec]
+
+        if spec == "random":
+            base_name = "Random Bot"
+        elif spec == "simple":
+            base_name = "Simple Bot"
+        else:
+            # Use the spec as-is. Only capitalise the first character when
+            # it starts with a plain lowercase letter (not a digit or symbol).
+            base_name = (spec[0].upper() + spec[1:]) if spec and spec[0].isalpha() else spec
+
+        names[pid] = f"{base_name} {seen[spec]}" if total > 1 else base_name
+
+    return names
+
+
+# ---------------------------------------------------------------------------
 # Game management helpers
 # ---------------------------------------------------------------------------
 
-def _create_game(base: str, args: argparse.Namespace, player_models: dict) -> str:
+def _create_game(base: str, args: argparse.Namespace,
+                 player_models: dict, player_names: dict) -> str:
     body = {
         "num_players": len(args.players),
         "small_blind": args.small_blind,
         "big_blind": args.big_blind,
         "starting_stack": args.starting_stack,
         "player_models": player_models,
+        "player_names": player_names,
     }
     r = requests.post(f"{base}/games", json=body, timeout=5)
     r.raise_for_status()
@@ -82,8 +126,27 @@ def _get_state(base: str, game_id: str) -> dict:
     return r.json()
 
 
-def _bot_move(base: str, game_id: str) -> None:
-    requests.post(f"{base}/games/{game_id}/bot_move", timeout=30)
+def _bot_move(base: str, game_id: str) -> bool:
+    """Trigger one bot action. Returns True on success, False on timeout/error."""
+    try:
+        # 120s: LLM API calls can be legitimately slow; give them room to breathe.
+        r = requests.post(f"{base}/games/{game_id}/bot_move", timeout=120)
+        data = r.json() if r.ok else {}
+        la = data.get("last_action") or {}
+        fr = la.get("failure_reason")
+        if fr:
+            name = la.get("display_name", "?")
+            print(f"[arena] {name}: {fr}")
+            raw = la.get("raw_response")
+            if raw:
+                print(f"[arena]   raw LLM output: {raw}")
+        return True
+    except requests.exceptions.ReadTimeout:
+        print("[arena] bot_move timed out waiting for LLM — skipping turn")
+        return False
+    except requests.RequestException as e:
+        print(f"[arena] bot_move error: {e}")
+        return False
 
 
 def _next_hand(base: str, game_id: str) -> None:
@@ -94,8 +157,38 @@ def _next_hand(base: str, game_id: str) -> None:
 # Spectator polling loop
 # ---------------------------------------------------------------------------
 
-def _spectator_loop(base: str, game_id: str, max_hands: int) -> None:
+def _register_arena(base: str, game_id: str, spectator: bool) -> None:
+    """Register this arena session with the server (for browser restart support)."""
+    try:
+        requests.post(
+            f"{base}/arena/register",
+            json={"game_id": game_id, "spectator": spectator},
+            timeout=5,
+        )
+    except requests.RequestException:
+        pass
+
+
+def _finish_arena(base: str) -> None:
+    """Signal the server (and browser) that the arena session is over."""
+    try:
+        requests.post(f"{base}/arena/finish", timeout=5)
+    except requests.RequestException:
+        pass
+
+
+def _check_arena_restart(base: str, current_game_id: str) -> str:
+    """Poll /arena/status; return the server's current game_id (may differ if browser restarted)."""
+    try:
+        r = requests.get(f"{base}/arena/status", timeout=3)
+        return r.json().get("game_id") or current_game_id
+    except requests.RequestException:
+        return current_game_id
+
+
+def _spectator_loop(base: str, initial_game_id: str, max_hands: int) -> None:
     """Drive all bot moves and hand transitions. Runs in the main thread."""
+    game_id = initial_game_id
     hands_played = 0
     print(f"\nSpectator mode — watching game {game_id}")
     if max_hands:
@@ -105,9 +198,22 @@ def _spectator_loop(base: str, game_id: str, max_hands: int) -> None:
 
     last_phase = None
     last_current = None
+    arena_check_ticks = 0  # how many ticks since last /arena/status check
 
     try:
         while True:
+            # Periodically check if the browser triggered a restart
+            arena_check_ticks += 1
+            if arena_check_ticks >= 10:
+                arena_check_ticks = 0
+                server_gid = _check_arena_restart(base, game_id)
+                if server_gid != game_id:
+                    game_id = server_gid
+                    hands_played = 0
+                    last_phase = None
+                    last_current = None
+                    print(f"\n[arena] Browser restart — switched to game {game_id}\n")
+
             try:
                 state = _get_state(base, game_id)
             except requests.RequestException as e:
@@ -134,16 +240,37 @@ def _spectator_loop(base: str, game_id: str, max_hands: int) -> None:
 
             if phase in ("hand_over", "showdown"):
                 hands_played += 1
-                if max_hands and hands_played >= max_hands:
-                    print(f"\nFinished {hands_played} hand(s). Exiting.")
+                # Check if all but one player have busted (natural game end)
+                active_players = [p for p in state.get("players", []) if p.get("stack", 0) > 0]
+                natural_end = len(active_players) <= 1
+
+                if (max_hands and hands_played >= max_hands) or natural_end:
+                    reason = "natural game end" if natural_end else f"{hands_played} hand(s)"
+                    print(f"\nGame over ({reason}). Signalling browser...")
+                    _finish_arena(base)
+                    # Wait until the browser acknowledges that it has rendered the
+                    # leaderboard overlay (it POSTs /arena/ack_summary).  We poll
+                    # /arena/status every second for up to 30 s, then exit anyway.
+                    print("Waiting for browser to display leaderboard... (max 30 s)")
+                    for _ in range(30):
+                        time.sleep(1)
+                        try:
+                            r = requests.get(f"{base}/arena/status", timeout=3)
+                            if r.json().get("summary_shown"):
+                                break
+                        except requests.RequestException:
+                            pass
+                    print("Leaderboard displayed. Exiting.")
                     sys.exit(0)
                 time.sleep(1.0)
                 _next_hand(base, game_id)
                 last_phase = None
                 last_current = None
             elif current is not None:
-                _bot_move(base, game_id)
-                time.sleep(POLL_INTERVAL)
+                ok = _bot_move(base, game_id)
+                # On timeout/error the server may have applied a fallback action
+                # or not; either way, the next state fetch will catch up.
+                time.sleep(POLL_INTERVAL if ok else 1.0)
             else:
                 time.sleep(POLL_INTERVAL)
 
@@ -238,25 +365,27 @@ def main() -> None:
     if args.key:
         os.environ["API_KEY"] = args.key
 
-    # --- Build player_models map ---
-    # random/simple are passed as-is; LLM aliases are left un-resolved here
-    # (game_session calls resolve_model internally via create_bot)
+    # --- Build player_models map and display names ---
     player_models: dict = {}
     for i, spec in enumerate(players):
         if spec != "human":
             player_models[f"player_{i}"] = spec
 
+    player_names = _make_display_names(players)
+
     # --- Print plan ---
-    from bots.openrouter_bot import model_display_name
     print("Texas Hold'em Arena")
     print("=" * 40)
     for i, spec in enumerate(players):
+        pid = f"player_{i}"
         if spec == "human":
             label = "YOU (human)"
-        elif spec in ("random", "simple"):
-            label = spec.title() + " Bot (no API key needed)"
         else:
-            label = f"{model_display_name(resolve_model(spec))}  [{resolve_model(spec)}]"
+            display = player_names.get(pid, spec)
+            if spec not in ("random", "simple"):
+                label = f"{display}  [{resolve_model(spec)}]"
+            else:
+                label = f"{display}  (no API key needed)"
         print(f"  player_{i}: {label}")
     print(f"\nBlinds: {args.small_blind}/{args.big_blind}  "
           f"Stack: {args.starting_stack}")
@@ -276,21 +405,26 @@ def main() -> None:
 
     # --- Create the game ---
     try:
-        game_id = _create_game(base, args, player_models)
+        game_id = _create_game(base, args, player_models, player_names)
     except requests.RequestException as e:
         print(f"Error creating game: {e}")
         sys.exit(1)
 
+    # --- Register arena session with the server (enables browser restart) ---
+    _register_arena(base, game_id, spectator)
+
     # --- Open browser ---
-    url = f"{base}/?game_id={game_id}"
+    url = f"{base}/?game_id={game_id}&arena=1"
     if spectator:
         url += "&spectator=1"
+    if args.hands > 0:
+        url += f"&hands={args.hands}"
     print(f"Opening browser: {url}\n")
     webbrowser.open(url)
 
     # --- Run ---
     if spectator:
-        _spectator_loop(base, game_id, args.hands)
+        _spectator_loop(base, game_id, args.hands)  # game_id = initial game
     else:
         # Human mode: keep server alive, browser drives everything
         print("Game running. Press Ctrl+C to stop.\n")

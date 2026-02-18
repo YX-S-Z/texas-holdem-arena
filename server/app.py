@@ -15,10 +15,22 @@ from engine.game_state import GameConfig, Player
 from engine.game_controller import GameController
 from .game_session import (
     create_game,
+    clone_game,
     get_game,
+    get_last_action,
+    get_hands_played,
+    get_bust_order,
+    get_failure_stats,
     is_bot_turn,
     apply_bot_action,
     next_hand,
+)
+from .arena_state import (
+    get_state as get_arena_state,
+    set_state as set_arena_state,
+    set_game_id as set_arena_game_id,
+    set_finished as set_arena_finished,
+    set_summary_shown as set_arena_summary_shown,
 )
 
 
@@ -35,6 +47,7 @@ class CreateGameBody(BaseModel):
     starting_stack: int = 1000
     bot_player_ids: Optional[list] = None
     player_models: Optional[dict] = None  # {player_id: model_alias}
+    player_names: Optional[dict] = None   # {player_id: display_name}
 
 
 class ActionBody(BaseModel):
@@ -53,6 +66,7 @@ def api_create_game(body: CreateGameBody):
         starting_stack=body.starting_stack,
         bot_player_ids=bot_ids,
         player_models=body.player_models,
+        player_names=body.player_names,
     )
     return {"game_id": game_id}
 
@@ -63,7 +77,13 @@ def api_get_state(game_id: str, viewer_id: Optional[str] = None):
     game = get_game(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    return game.get_state(viewer_id=viewer_id)
+    state = game.get_state(viewer_id=viewer_id)
+    state["last_action"] = get_last_action(game_id)
+    state["hands_played"] = get_hands_played(game_id)
+    state["bust_order"] = get_bust_order(game_id)
+    state["failure_stats"] = get_failure_stats(game_id)
+    state["arena_finished"] = get_arena_state().get("finished", False)
+    return state
 
 
 @app.post("/games/{game_id}/action")
@@ -85,8 +105,14 @@ def api_bot_move(game_id: str, viewer_id: Optional[str] = None):
     game = get_game(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    applied = apply_bot_action(game_id)
-    return game.get_state(viewer_id=viewer_id or "player_0")
+    apply_bot_action(game_id)
+    state = game.get_state(viewer_id=viewer_id or "player_0")
+    state["last_action"] = get_last_action(game_id)
+    state["hands_played"] = get_hands_played(game_id)
+    state["bust_order"] = get_bust_order(game_id)
+    state["failure_stats"] = get_failure_stats(game_id)
+    state["arena_finished"] = get_arena_state().get("finished", False)
+    return state
 
 
 @app.get("/games/{game_id}/is_bot_turn")
@@ -103,6 +129,53 @@ def api_next_hand(game_id: str, viewer_id: Optional[str] = None):
     if not next_hand(game_id):
         raise HTTPException(status_code=400, detail="Could not start next hand")
     return game.get_state(viewer_id=viewer_id or "player_0")
+
+
+class ArenaRegisterBody(BaseModel):
+    game_id: str
+    spectator: bool = False
+
+
+@app.post("/arena/register")
+def arena_register(body: ArenaRegisterBody):
+    """Called by arena.py on startup to register the active session."""
+    set_arena_state(body.game_id, body.spectator)
+    return {"ok": True}
+
+
+@app.get("/arena/status")
+def arena_status():
+    """Returns current arena state: {game_id, spectator}."""
+    return get_arena_state()
+
+
+@app.post("/arena/finish")
+def arena_finish():
+    """Called by arena.py when all hands are done. Signals the browser to show the summary."""
+    set_arena_finished()
+    return {"ok": True}
+
+
+@app.post("/arena/ack_summary")
+def arena_ack_summary():
+    """Called by the browser after it successfully renders the game-over leaderboard.
+    arena.py polls /arena/status for summary_shown=True before exiting."""
+    set_arena_summary_shown()
+    return {"ok": True}
+
+
+@app.post("/arena/restart")
+def arena_restart_game():
+    """Clone the current arena game and return the new game_id.
+    Used by the browser 'Restart' button; arena.py polls /arena/status to detect the switch."""
+    state = get_arena_state()
+    if not state["game_id"]:
+        raise HTTPException(status_code=400, detail="No arena session active")
+    new_id = clone_game(state["game_id"])
+    if not new_id:
+        raise HTTPException(status_code=500, detail="Failed to clone game")
+    set_arena_game_id(new_id)
+    return {"game_id": new_id, "spectator": state["spectator"]}
 
 
 @app.get("/")

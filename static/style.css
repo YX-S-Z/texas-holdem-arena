@@ -211,6 +211,107 @@ header h1 { margin: 0; font-size: 1.5rem; }
 
 /* Seat positions are computed dynamically in app.js via inline styles */
 
+#thinking-panel {
+  margin-top: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid #3a6a3a;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #ddd;
+}
+
+#thinking-panel .thinking-name {
+  font-weight: bold;
+  color: #ffc107;
+  margin-right: 0.4rem;
+}
+
+#thinking-panel .thinking-text {
+  font-style: italic;
+  color: #ccc;
+}
+
+#thinking-panel .thinking-action {
+  margin-left: 0.5rem;
+  font-weight: bold;
+  color: #7ec87e;
+}
+
+/* Failure badges in thinking panel and log */
+.thinking-failure-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: bold;
+  padding: 1px 7px;
+  border-radius: 10px;
+  margin: 0 0.35rem;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.thinking-failure-badge.failure-timeout      { background: #7a4a00; color: #ffb84d; border: 1px solid #a06010; }
+.thinking-failure-badge.failure-parse-error  { background: #5a1a1a; color: #ff9999; border: 1px solid #8a3030; }
+.thinking-failure-badge.failure-parse-rescued { background: #1a3a1a; color: #88dd88; border: 1px solid #3a7a3a; }
+.thinking-failure-badge.failure-api-error    { background: #3a1a4a; color: #cc99ff; border: 1px solid #6a3a8a; }
+
+/* Failure line under chip/bust info in summary */
+.summary-failures {
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 1px;
+  padding-left: 3.2rem;  /* align under the name, past the medal */
+}
+
+.summary-failures.has-failures { color: #ff9966; }
+
+#thinking-log-container {
+  margin-top: 0.75rem;
+}
+
+#thinking-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.3rem;
+  font-size: 0.8rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#thinking-log-header button {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  background: #1a3a1a;
+  color: #aaa;
+  border: 1px solid #3a5a3a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#thinking-log-header button:hover { background: #2a4a2a; color: #ddd; }
+
+#thinking-log {
+  max-height: 220px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid #2a5a2a;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: #ccc;
+}
+
+.thinking-log-entry {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.thinking-log-entry:last-child { border-bottom: none; }
+
 #actions {
   margin-top: 1rem;
   padding: 1rem 0.5rem 0;
@@ -275,3 +376,127 @@ header h1 { margin: 0; font-size: 1.5rem; }
 }
 
 .winners { margin-top: 0.5rem; color: #ffc107; }
+
+/* ── Game-over summary modal ──────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(3px);
+}
+
+.summary-card {
+  background: #0f2a0f;
+  border: 2px solid #4a7a4a;
+  border-radius: 16px;
+  padding: 2rem 2.5rem;
+  min-width: 340px;
+  max-width: 480px;
+  width: 90%;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+  text-align: center;
+}
+
+.summary-title {
+  font-size: 1.6rem;
+  margin: 0 0 0.3rem 0;
+  color: #ffc107;
+}
+
+.summary-subtitle {
+  font-size: 0.85rem;
+  color: #888;
+  margin: 0 0 1.25rem 0;
+}
+
+.summary-rankings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.5rem;
+}
+
+.summary-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: left;
+}
+
+.summary-row.rank-1 { background: rgba(212, 175, 55, 0.15); border: 1px solid rgba(212,175,55,0.3); }
+.summary-row.rank-2 { background: rgba(180, 180, 180, 0.1); border: 1px solid rgba(180,180,180,0.2); }
+.summary-row.rank-3 { background: rgba(176, 110, 60, 0.1);  border: 1px solid rgba(176,110,60,0.2);  }
+
+.summary-medal {
+  font-size: 1.3rem;
+  min-width: 2rem;
+  text-align: center;
+}
+
+.summary-name {
+  flex: 1;
+  font-weight: bold;
+  font-size: 0.95rem;
+  color: #eee;
+}
+
+.summary-chips {
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: #7ec87e;
+}
+
+.summary-chips-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #2a5a2a;
+  margin-top: 2px;
+}
+
+.summary-chips-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: #4a9a4a;
+}
+
+.summary-bust {
+  font-size: 0.82rem;
+  color: #888;
+  font-style: italic;
+}
+
+.summary-buttons {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.summary-buttons button {
+  padding: 0.55rem 1.4rem;
+  border-radius: 8px;
+  border: 1px solid #4a7a4a;
+  background: #2a5a2a;
+  color: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.summary-buttons button:hover { background: #3a6a3a; }
+
+.summary-buttons button.primary {
+  background: #d4af37;
+  border-color: #d4af37;
+  color: #111;
+  font-weight: bold;
+}
+
+.summary-buttons button.primary:hover { background: #e0c040; }

@@ -275,11 +275,14 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
         ).dropna()
         avg_raise = raise_amts.mean() if len(raise_amts) > 0 else 0.0
 
-        # ── LLM quality ───────────────────────────────────────────────────
-        error_rate = (
-            pa["failure_reason"].notna().sum() / total * 100
-            if total > 0 else 0.0
-        )
+        # ── LLM quality — error type breakdown ────────────────────────────
+        err = pa["failure_reason"].fillna("")
+        n_parse_error          = (err == "parse_error").sum()
+        n_parse_error_rescued  = (err == "parse_error_rescued").sum()
+        n_timeout              = (err == "timeout").sum()
+        n_api_error            = (err == "api_error").sum()
+        n_any_error            = pa["failure_reason"].notna().sum()
+        error_rate = n_any_error / total * 100 if total > 0 else 0.0
 
         # ── Thinking depth ────────────────────────────────────────────────
         thinking_texts = pa["thinking"].dropna()
@@ -331,7 +334,12 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
             "fold_rate":        round(fold_rate, 1),
             "pre_fold_rate":    round(pre_fold_rate, 1),
             "avg_raise_size":   round(avg_raise, 1),
-            "error_rate":       round(error_rate, 1),
+            "error_rate":              round(error_rate, 1),
+            "n_parse_error":           int(n_parse_error),
+            "n_parse_error_rescued":   int(n_parse_error_rescued),
+            "n_timeout":               int(n_timeout),
+            "n_api_error":             int(n_api_error),
+            "n_any_error":             int(n_any_error),
             "avg_thinking_len": round(avg_think_len, 0),
             "avg_chen_enter":   round(avg_chen_enter, 2) if pd.notna(avg_chen_enter) else float("nan"),
             "avg_chen_fold":    round(avg_chen_fold,  2) if pd.notna(avg_chen_fold)  else float("nan"),
@@ -724,6 +732,58 @@ def plot_thinking_keywords(kw_analysis: dict, metrics: pd.DataFrame, out: Path):
     print("  ✓ thinking_keywords.png")
 
 
+def plot_error_breakdown(metrics: pd.DataFrame, out: Path):
+    """
+    Stacked horizontal bar chart showing error type breakdown per player.
+    Only renders if at least one error exists in the dataset.
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        return
+
+    error_cols   = ["n_parse_error", "n_parse_error_rescued", "n_timeout", "n_api_error"]
+    error_labels = ["Parse Error (fallback)", "Parse Rescued (guardrail)", "Timeout", "API Error"]
+    error_colors = ["#EF5350", "#FF9800", "#9C27B0", "#607D8B"]
+
+    # Only include players who had at least one error
+    has_errors = metrics[error_cols].sum(axis=1) > 0
+    df = metrics[has_errors].copy()
+
+    if df.empty:
+        print("  ⚠ Skipping error_breakdown (no errors recorded)")
+        return
+
+    # Build absolute counts and total-actions denominators
+    names  = df["display_name"].tolist()
+    totals = df["total_actions"].tolist()
+
+    fig, ax = plt.subplots(figsize=(12, max(3, len(df) * 0.7)))
+    left = np.zeros(len(df))
+
+    for col, label, color in zip(error_cols, error_labels, error_colors):
+        vals = df[col].values.astype(float)
+        ax.barh(names, vals, left=left, color=color, label=label, height=0.55)
+        for i, (v, l) in enumerate(zip(vals, left)):
+            if v >= 1:
+                ax.text(l + v / 2, i, str(int(v)), ha="center", va="center",
+                        fontsize=8, color="white", fontweight="bold")
+        left += vals
+
+    # Annotate total error rate on the right
+    for i, (total_err, total_act) in enumerate(zip(left, totals)):
+        rate = total_err / total_act * 100 if total_act > 0 else 0
+        ax.text(left[i] + 0.2, i, f"  {rate:.0f}% of {int(total_act)} moves",
+                va="center", fontsize=8, color="#ccc")
+
+    ax.set_xlabel("Number of Errors", fontsize=11)
+    ax.set_title("LLM Output Error Breakdown by Player", fontsize=14, fontweight="bold")
+    ax.legend(loc="lower right", fontsize=9)
+    ax.invert_yaxis()
+    plt.tight_layout()
+    plt.savefig(out / "error_breakdown.png", dpi=150)
+    plt.close()
+    print("  ✓ error_breakdown.png")
+
+
 # ── Report Generation ─────────────────────────────────────────────────────────
 
 def generate_report(
@@ -804,8 +864,43 @@ def generate_report(
         "| **Fold%** | Overall fold rate across all streets |",
         "| **Pre-Fold%** | Preflop-only fold rate |",
         "| **Avg Raise** | Mean bet/raise size in chips (postflop only) |",
-        "| **Error%** | LLM parse-error rate — model output failed to match expected JSON format |",
+        "| **Error%** | Total LLM output error rate (all error types combined) |",
         "| **Think Len** | Mean length of `thinking` reasoning text in characters |",
+        "",
+        "---",
+        "",
+        "## LLM Output Reliability",
+        "",
+        "Tracks how often each model's output failed to parse correctly. "
+        "High error rates indicate poor instruction-following for structured JSON output.",
+        "",
+        "| Player | Total Moves | Parse Error | Rescued | Timeout | API Error | Error Rate |",
+        "|--------|-------------|-------------|---------|---------|-----------|------------|",
+    ]
+
+    for pid, row in metrics.sort_values("error_rate", ascending=False).iterrows():
+        total   = int(row["total_actions"])
+        pe      = int(row["n_parse_error"])
+        pr      = int(row["n_parse_error_rescued"])
+        to      = int(row["n_timeout"])
+        ae      = int(row["n_api_error"])
+        er      = row["error_rate"]
+        # Highlight bad rates
+        rate_str = f"**{er:.1f}%**" if er >= 20 else f"{er:.1f}%"
+        lines.append(
+            f"| {row['display_name']} | {total} | {pe} | {pr} | {to} | {ae} | {rate_str} |"
+        )
+
+    lines += [
+        "",
+        "**Error type glossary:**",
+        "",
+        "| Type | Meaning |",
+        "|------|---------|",
+        "| **Parse Error** | Model output could not be parsed; a fallback action (fold/check) was used |",
+        "| **Rescued** | Primary parse failed but a secondary guardrail extracted a valid action |",
+        "| **Timeout** | Model API call exceeded the time limit; fallback action used |",
+        "| **API Error** | Network or upstream API failure |",
         "",
         "---",
         "",
@@ -853,8 +948,12 @@ def generate_report(
             f"- Chen hand score when *entering* pot: **{chen_enter_str}** "
             f"| when *folding*: **{chen_fold_str}** "
             f"(scale 1–20; ≥8 = premium hand)",
-            f"- LLM parse error rate: **{row['error_rate']}%** "
-            f"(lower = better instruction-following)",
+            f"- LLM output error rate: **{row['error_rate']}%** "
+            f"({int(row['n_parse_error'])} parse errors, "
+            f"{int(row['n_parse_error_rescued'])} rescued, "
+            f"{int(row['n_timeout'])} timeouts, "
+            f"{int(row['n_api_error'])} API errors"
+            f" out of {int(row['total_actions'])} moves)",
             f"- Average reasoning length: **{row['avg_thinking_len']:.0f} chars**",
             "",
             f"**Thinking style** (keyword density, dominant: _{dominant_style}_):",
@@ -883,6 +982,7 @@ def generate_report(
         "| `chen_vs_action.png` | Preflop hand strength (Chen score) by action type |",
         "| `personality_radar.png` | Multi-dimensional radar chart per player |",
         "| `thinking_keywords.png` | Thinking-log keyword density by behavioral category |",
+        "| `error_breakdown.png` | LLM output error counts by type per player |",
         "",
         "---",
         "",
@@ -986,6 +1086,7 @@ def main():
         plot_chen_vs_action(actions, metrics, out_dir)
         plot_radar_chart(metrics, out_dir)
         plot_thinking_keywords(kw_analysis, metrics, out_dir)
+        plot_error_breakdown(metrics, out_dir)
     else:
         print("► Skipping charts (matplotlib not installed)")
 

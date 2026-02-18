@@ -183,12 +183,20 @@ def is_bot_turn(game_id: str) -> bool:
 
 
 def next_hand(game_id: str) -> bool:
-    """Start the next hand. Updates bust tracking and increments hands_played."""
+    """Start the next hand. Updates bust tracking and increments hands_played.
+
+    Returns False (without starting a hand) when fewer than 2 players have chips —
+    indicating natural game-over; the caller should show the leaderboard instead.
+    """
     s = _sessions.get(game_id)
     if not s:
         return False
     _log_current_hand_result(game_id, s)   # write hand result before resetting state
     _update_bust_order(s)                  # capture any busts before starting next hand
+    # Guard: refuse to start a hand if fewer than 2 players can still play
+    active = [p for p in s["controller"].players if p.stack > 0]
+    if len(active) < 2:
+        return False
     s["hands_played"] += 1
     s["hand_result_logged"] = False        # ready to log the new hand
     s["controller"].start_hand()

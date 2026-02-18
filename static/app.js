@@ -158,7 +158,8 @@ function renderPlayers(state) {
 
       // Update className
       var cls = "player";
-      if (p.folded) cls += " folded";
+      if (p.folded || p.busted) cls += " folded";
+      if (p.busted) cls += " busted";
       if (p.id === currentId) cls += " current-turn";
       if (p.id === HUMAN_ID) cls += " is-human";
       if (existing.className !== cls) existing.className = cls;
@@ -175,12 +176,12 @@ function renderPlayers(state) {
 
       // Update stack
       var stackEl = existing.querySelector(".stack");
-      var stackText = "Stack: " + p.stack;
+      var stackText = p.busted ? "BUST" : "Stack: " + p.stack;
       if (stackEl.textContent !== stackText) stackEl.textContent = stackText;
 
       // Update bet
       var betEl = existing.querySelector(".bet");
-      var betText = "Bet: " + p.current_bet;
+      var betText = p.busted ? "" : "Bet: " + p.current_bet;
       if (betEl.textContent !== betText) betEl.textContent = betText;
 
       // Only rebuild cards if they actually changed
@@ -189,7 +190,9 @@ function renderPlayers(state) {
         existing.setAttribute("data-cards", newCK);
         var cardsEl = existing.querySelector(".cards");
         cardsEl.innerHTML = "";
-        if (p.hole_cards && p.hole_cards.length > 0) {
+        if (p.busted) {
+          // no cards shown for eliminated players
+        } else if (p.hole_cards && p.hole_cards.length > 0) {
           for (var j = 0; j < p.hole_cards.length; j++) {
             cardsEl.appendChild(cardEl(p.hole_cards[j], false));
           }
@@ -204,7 +207,8 @@ function renderPlayers(state) {
       div.setAttribute("data-player-id", p.id);
 
       var cls = "player";
-      if (p.folded) cls += " folded";
+      if (p.folded || p.busted) cls += " folded";
+      if (p.busted) cls += " busted";
       if (p.id === currentId) cls += " current-turn";
       if (p.id === HUMAN_ID) cls += " is-human";
       div.className = cls;
@@ -223,11 +227,13 @@ function renderPlayers(state) {
 
       div.innerHTML =
         '<div class="name">' + label + badges + '</div>' +
-        '<div class="stack">Stack: ' + p.stack + '</div>' +
-        '<div class="bet">Bet: ' + p.current_bet + '</div>' +
+        '<div class="stack">' + (p.busted ? "BUST" : "Stack: " + p.stack) + '</div>' +
+        '<div class="bet">' + (p.busted ? "" : "Bet: " + p.current_bet) + '</div>' +
         '<div class="cards"></div>';
       var cardsEl = div.querySelector(".cards");
-      if (p.hole_cards && p.hole_cards.length > 0) {
+      if (p.busted) {
+        // no cards shown for eliminated players
+      } else if (p.hole_cards && p.hole_cards.length > 0) {
         for (var j = 0; j < p.hole_cards.length; j++) {
           cardsEl.appendChild(cardEl(p.hole_cards[j], false));
         }
@@ -361,49 +367,113 @@ function renderSummary(state) {
   var handsPlayed = (state.hands_played || 0) + 1;  // +1: first hand isn't counted by next_hand()
   var failStats   = state.failure_stats || {};
   var medals      = ["🥇", "🥈", "🥉"];
+  var twoCol = ranked.length > 4;
 
-  var html = '<div class="summary-card">';
-  html += '<h2 class="summary-title">🏆 Game Over</h2>';
-  html += '<p class="summary-subtitle">Final results &mdash; ' + handsPlayed + ' hand' + (handsPlayed !== 1 ? "s" : "") + ' played</p>';
-  html += '<div class="summary-rankings">';
+  // Shared helper: extract failure stats for a player
+  function getFailInfo(r) {
+    var pf = failStats[r.player.id] || {};
+    var totalMoves = pf.total_moves || 0;
+    var totalFails = (pf.timeout || 0) + (pf.parse_error || 0) + (pf.parse_error_rescued || 0) + (pf.api_error || 0);
+    return { pf: pf, totalMoves: totalMoves, totalFails: totalFails };
+  }
 
-  ranked.forEach(function(r) {
+  // Single-column layout: horizontal row + separate failure line below (≤4 players)
+  function buildPlayerRow(r) {
     var medal = medals[r.rank - 1] || ("#" + r.rank);
     var name  = (!SPECTATOR_MODE && r.player.id === HUMAN_ID) ? "Human" : (r.player.display_name || r.player.id);
-    var pf    = failStats[r.player.id] || {};
-    var totalMoves   = pf.total_moves || 0;
-    var totalFails   = (pf.timeout || 0) + (pf.parse_error || 0) + (pf.parse_error_rescued || 0) + (pf.api_error || 0);
+    var fi = getFailInfo(r);
 
-    html += '<div class="summary-row rank-' + r.rank + '">';
-    html += '<span class="summary-medal">' + medal + '</span>';
-    html += '<span class="summary-name">' + escapeHtml(name) + '</span>';
+    var out = '<div class="summary-row rank-' + r.rank + '">';
+    out += '<span class="summary-medal">' + medal + '</span>';
+    out += '<span class="summary-name">' + escapeHtml(name) + '</span>';
     if (r.type === "alive") {
-      html += '<span class="summary-chips">' + r.player.stack.toLocaleString() + ' chips</span>';
+      out += '<span class="summary-chips">' + r.player.stack.toLocaleString() + ' chips</span>';
     } else {
-      html += '<span class="summary-bust">busted (hand ' + r.hand_number + ')</span>';
+      out += '<span class="summary-bust">busted (hand ' + r.hand_number + ')</span>';
+    }
+    out += '</div>';
+
+    if (fi.totalMoves > 0) {
+      var failCls = fi.totalFails > 0 ? " has-failures" : "";
+      out += '<div class="summary-failures' + failCls + '">';
+      if (fi.totalFails === 0) {
+        out += '✓ ' + fi.totalMoves + ' moves &mdash; 0 failures';
+      } else {
+        var pct = Math.round(fi.totalFails / fi.totalMoves * 100);
+        var parts = [];
+        if (fi.pf.timeout)             parts.push(fi.pf.timeout + ' timeout' + (fi.pf.timeout > 1 ? 's' : ''));
+        if (fi.pf.parse_error)         parts.push(fi.pf.parse_error + ' parse error' + (fi.pf.parse_error > 1 ? 's' : '') + ' (fallback)');
+        if (fi.pf.parse_error_rescued) parts.push(fi.pf.parse_error_rescued + ' parse error' + (fi.pf.parse_error_rescued > 1 ? 's' : '') + ' (guardrail ✓)');
+        if (fi.pf.api_error)           parts.push(fi.pf.api_error + ' api error' + (fi.pf.api_error > 1 ? 's' : ''));
+        out += fi.totalFails + '/' + fi.totalMoves + ' moves failed (' + pct + '%) &mdash; ' + parts.join(', ');
+      }
+      out += '</div>';
+    }
+    return out;
+  }
+
+  // Grid-card layout: one self-contained card per player (5+ players, two-col grid).
+  // All three sections always rendered so CSS grid can stretch cards to equal height.
+  function buildPlayerCard(r) {
+    var medal = medals[r.rank - 1] || ("#" + r.rank);
+    var name  = (!SPECTATOR_MODE && r.player.id === HUMAN_ID) ? "Human" : (r.player.display_name || r.player.id);
+    var fi = getFailInfo(r);
+
+    var out = '<div class="spc rank-' + r.rank + '">';
+
+    // Medal + name on one line
+    out += '<div class="spc-header">';
+    var medalCls = r.rank > 3 ? "spc-medal spc-rank-num" : "spc-medal";
+    out += '<span class="' + medalCls + '">' + medal + '</span>';
+    out += '<span class="spc-name">' + escapeHtml(name) + '</span>';
+    out += '</div>';
+
+    // Chips or bust status
+    if (r.type === "alive") {
+      out += '<div class="spc-result spc-chips">' + r.player.stack.toLocaleString() + ' chips</div>';
+    } else {
+      out += '<div class="spc-result spc-bust">busted (hand ' + r.hand_number + ')</div>';
+    }
+
+    // Failure line — always present (blank when no data) to keep card heights consistent
+    var failCls = fi.totalFails > 0 ? " has-failures" : "";
+    out += '<div class="spc-fail' + failCls + '">';
+    if (fi.totalMoves > 0) {
+      if (fi.totalFails === 0) {
+        out += '✓ ' + fi.totalMoves + ' moves &mdash; 0 failures';
+      } else {
+        var pct = Math.round(fi.totalFails / fi.totalMoves * 100);
+        out += fi.totalFails + '/' + fi.totalMoves + ' failed (' + pct + '%)';
+      }
+    }
+    out += '</div>';
+
+    out += '</div>'; // .spc
+    return out;
+  }
+
+  var html = '<div class="summary-card' + (twoCol ? ' two-col' : '') + '">';
+  html += '<h2 class="summary-title">🏆 Game Over</h2>';
+  html += '<p class="summary-subtitle">Final results &mdash; ' + handsPlayed + ' hand' + (handsPlayed !== 1 ? "s" : "") + ' played</p>';
+
+  if (twoCol) {
+    // Column-major order: left col = ranks 1..half, right col = ranks half+1..n
+    // Interleave so CSS grid rows read: (1,5), (2,6), (3,7), (4,8)
+    html += '<div class="summary-rankings two-col">';
+    var half = Math.ceil(ranked.length / 2);
+    var leftCol  = ranked.slice(0, half);
+    var rightCol = ranked.slice(half);
+    for (var ci = 0; ci < half; ci++) {
+      html += buildPlayerCard(leftCol[ci]);
+      if (rightCol[ci]) html += buildPlayerCard(rightCol[ci]);
     }
     html += '</div>';
+  } else {
+    html += '<div class="summary-rankings">';
+    ranked.forEach(function(r) { html += buildPlayerRow(r); });
+    html += '</div>';
+  }
 
-    // Failure stats line (only show when there's move data to report)
-    if (totalMoves > 0) {
-      var failCls = totalFails > 0 ? " has-failures" : "";
-      html += '<div class="summary-failures' + failCls + '">';
-      if (totalFails === 0) {
-        html += '✓ ' + totalMoves + ' moves &mdash; 0 failures';
-      } else {
-        var pct = Math.round(totalFails / totalMoves * 100);
-        var parts = [];
-        if (pf.timeout)               parts.push(pf.timeout + ' timeout' + (pf.timeout > 1 ? 's' : ''));
-        if (pf.parse_error)           parts.push(pf.parse_error + ' parse error' + (pf.parse_error > 1 ? 's' : '') + ' (fallback)');
-        if (pf.parse_error_rescued)   parts.push(pf.parse_error_rescued + ' parse error' + (pf.parse_error_rescued > 1 ? 's' : '') + ' (guardrail ✓)');
-        if (pf.api_error)             parts.push(pf.api_error + ' api error' + (pf.api_error > 1 ? 's' : ''));
-        html += totalFails + '/' + totalMoves + ' moves failed (' + pct + '%) &mdash; ' + parts.join(', ');
-      }
-      html += '</div>';
-    }
-  });
-
-  html += '</div>';  // .summary-rankings
   html += '<div class="summary-buttons">';
   if (ARENA_MODE && !SPECTATOR_MODE) {
     html += '<button class="primary" id="summary-play-again">Play Again</button>';
@@ -596,6 +666,7 @@ function renderActions(state) {
         if (!SPECTATOR_MODE && w.player_id === HUMAN_ID) wName = "Human";
         var wStr = wName + " (+" + w.amount + ")";
         if (w.hand_name) wStr += " with " + w.hand_name;
+        else wStr += " — all others folded";
         parts.push(wStr);
       }
       // Show hand progress alongside winner when a limit is set
@@ -630,6 +701,11 @@ function renderActions(state) {
   if (isMyTurn && state.legal_actions && state.legal_actions.length > 0) {
     msg.textContent = "Your turn.";
     var raiseAction = null;
+
+    // mainRow holds Fold / Check / Call / Raise / All-In (always shown first)
+    var mainRow = document.createElement("div");
+    mainRow.className = "action-main-row";
+
     for (var i = 0; i < state.legal_actions.length; i++) {
       (function (a) {
         if (a.type === "fold") {
@@ -637,23 +713,25 @@ function renderActions(state) {
           b.className = "danger";
           b.textContent = "Fold";
           b.onclick = function () { raiseOpen = false; sendAction({ type: "fold" }); };
-          btns.appendChild(b);
+          mainRow.appendChild(b);
         } else if (a.type === "check") {
           var b = document.createElement("button");
           b.textContent = "Check";
           b.onclick = function () { raiseOpen = false; sendAction({ type: "check" }); };
-          btns.appendChild(b);
+          mainRow.appendChild(b);
         } else if (a.type === "call") {
           var b = document.createElement("button");
           b.textContent = "Call " + (a.amount || 0);
           b.onclick = function () { raiseOpen = false; sendAction({ type: "call", amount: a.amount }); };
-          btns.appendChild(b);
+          mainRow.appendChild(b);
         } else if (a.type === "raise") {
           raiseAction = a;
         }
       })(state.legal_actions[i]);
     }
-    // Raise + All-in buttons inline with fold/check/call
+
+    // Raise detail panel — replaces mainRow in-place when "Raise" is clicked
+    var raiseDetail = null;
     if (raiseAction) {
       var minAmt = raiseAction.min_amount;
       var maxAmt = raiseAction.max_amount;
@@ -661,11 +739,7 @@ function renderActions(state) {
 
       var raiseBtn = document.createElement("button");
       raiseBtn.textContent = "Raise";
-      raiseBtn.onclick = function () {
-        raiseOpen = true;
-        raiseDetail.style.display = "flex";
-      };
-      btns.appendChild(raiseBtn);
+      mainRow.appendChild(raiseBtn);
 
       var allinBtn = document.createElement("button");
       allinBtn.className = "allin";
@@ -674,10 +748,10 @@ function renderActions(state) {
         raiseOpen = false;
         sendAction({ type: "raise", amount: maxAmt });
       };
-      btns.appendChild(allinBtn);
+      mainRow.appendChild(allinBtn);
 
-      // Raise detail row (slider + preset buttons + cancel) — shown below
-      var raiseDetail = document.createElement("div");
+      // Raise detail: slider + confirm + preset chips (1x/3x/5x BB) + cancel
+      raiseDetail = document.createElement("div");
       raiseDetail.className = "raise-detail";
       raiseDetail.style.display = "none";
 
@@ -707,14 +781,10 @@ function renderActions(state) {
       raiseDetail.appendChild(amtLabel);
       raiseDetail.appendChild(confirmBtn);
 
-      // Preset buttons: 3x BB, 5x BB — show the actual chip amount
-      var presets = [
-        { multiplier: 3, amount: bb * 3 },
-        { multiplier: 5, amount: bb * 5 }
-      ];
+      // Preset buttons: 1x BB, 3x BB, 5x BB — show chip amount as number
+      var presets = [ bb * 1, bb * 3, bb * 5 ];
       for (var pi = 0; pi < presets.length; pi++) {
-        (function (preset) {
-          var amt = preset.amount;
+        (function (amt) {
           if (amt >= minAmt && amt <= maxAmt) {
             var pb = document.createElement("button");
             pb.className = "preset";
@@ -733,11 +803,20 @@ function renderActions(state) {
       cancelBtn.onclick = function () {
         raiseOpen = false;
         raiseDetail.style.display = "none";
+        mainRow.style.display = "flex";
       };
       raiseDetail.appendChild(cancelBtn);
 
-      btns.appendChild(raiseDetail);
+      // Toggle: clicking Raise swaps mainRow ↔ raiseDetail in the same row
+      raiseBtn.onclick = function () {
+        raiseOpen = true;
+        mainRow.style.display = "none";
+        raiseDetail.style.display = "flex";
+      };
     }
+
+    btns.appendChild(mainRow);
+    if (raiseDetail) btns.appendChild(raiseDetail);
     return;
   }
 

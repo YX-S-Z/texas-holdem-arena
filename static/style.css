@@ -161,6 +161,8 @@ header h1 { margin: 0; font-size: 1.5rem; }
 }
 
 .player.folded { opacity: 0.5; }
+.player.busted { opacity: 0.35; filter: grayscale(80%); }
+.player.busted .stack { color: #e57373; font-weight: bold; }
 .player.current-turn { border-color: #ffc107; box-shadow: 0 0 12px #ffc107, 0 0 24px rgba(255,193,7,0.3); }
 .player.is-human { border-color: #4aa3df; box-shadow: 0 0 8px rgba(74,163,223,0.3); }
 .player.is-human.current-turn { border-color: #ffc107; box-shadow: 0 0 12px #ffc107, 0 0 24px rgba(255,193,7,0.3); }
@@ -392,6 +394,14 @@ header h1 { margin: 0; font-size: 1.5rem; }
 #action-buttons button.allin { background: #8a6a0a; border-color: #aa8a2a; }
 #action-buttons button.allin:hover { background: #aa8a2a; }
 
+/* Wrapper for the primary action buttons (Fold / Check / Call / Raise / All-In) */
+.action-main-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .raise-detail {
   display: flex;
   align-items: center;
@@ -401,8 +411,6 @@ header h1 { margin: 0; font-size: 1.5rem; }
   background: #0f2f0f;
   border-radius: 6px;
   border: 1px solid #2a6a2a;
-  width: 100%;
-  margin-top: 0.5rem;
 }
 
 #action-buttons button.preset {
@@ -454,6 +462,11 @@ header h1 { margin: 0; font-size: 1.5rem; }
   text-align: center;
 }
 
+/* Wider card for 5+ player games */
+.summary-card.two-col {
+  max-width: 820px;
+}
+
 .summary-title {
   font-size: 1.6rem;
   margin: 0 0 0.3rem 0;
@@ -473,6 +486,82 @@ header h1 { margin: 0; font-size: 1.5rem; }
   margin-bottom: 1.5rem;
 }
 
+/* Two-column grid layout for 5+ player games */
+.summary-rankings.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  align-items: stretch;
+  margin-bottom: 1.5rem;
+}
+
+/* Unified player card for the two-column grid */
+.spc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.7rem 1rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+}
+
+.spc.rank-1 { background: rgba(212, 175, 55, 0.28); border-color: rgba(212, 175, 55, 0.6); }
+.spc.rank-2 { background: rgba(192, 196, 210, 0.18); border-color: rgba(192, 196, 210, 0.45); }
+.spc.rank-3 { background: rgba(176, 110, 60, 0.22); border-color: rgba(200, 130, 70, 0.55); }
+
+.spc-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.spc-medal {
+  font-size: 1.7rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.spc-rank-num {
+  font-size: 0.88rem;
+  color: #888;
+  line-height: normal;
+}
+
+.spc-name {
+  font-weight: bold;
+  font-size: 0.88rem;
+  color: #eee;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.spc-result {
+  font-size: 0.85rem;
+  font-weight: bold;
+  margin-top: 0.1rem;
+}
+
+.spc-chips { color: #7ec87e; }
+
+.spc-bust {
+  color: #888;
+  font-style: italic;
+  font-weight: normal;
+}
+
+.spc-fail {
+  font-size: 0.73rem;
+  color: #666;
+  min-height: 1.1em;
+  margin-top: 0.1rem;
+}
+
+.spc-fail.has-failures { color: #ff9966; }
+
 .summary-row {
   display: flex;
   align-items: center;
@@ -483,14 +572,15 @@ header h1 { margin: 0; font-size: 1.5rem; }
   text-align: left;
 }
 
-.summary-row.rank-1 { background: rgba(212, 175, 55, 0.15); border: 1px solid rgba(212,175,55,0.3); }
-.summary-row.rank-2 { background: rgba(180, 180, 180, 0.1); border: 1px solid rgba(180,180,180,0.2); }
-.summary-row.rank-3 { background: rgba(176, 110, 60, 0.1);  border: 1px solid rgba(176,110,60,0.2);  }
+.summary-row.rank-1 { background: rgba(212, 175, 55, 0.28); border: 1px solid rgba(212,175,55,0.6); }
+.summary-row.rank-2 { background: rgba(192, 196, 210, 0.18); border: 1px solid rgba(192,196,210,0.45); }
+.summary-row.rank-3 { background: rgba(176, 110, 60, 0.22);  border: 1px solid rgba(200,130,70,0.55);  }
 
 .summary-medal {
-  font-size: 1.3rem;
+  font-size: 1.7rem;
   min-width: 2rem;
   text-align: center;
+  line-height: 1;
 }
 
 .summary-name {

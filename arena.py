@@ -310,7 +310,7 @@ Examples (with API key):
     parser.add_argument("--small-blind", type=int, default=5, dest="small_blind")
     parser.add_argument("--big-blind",   type=int, default=10, dest="big_blind")
     parser.add_argument(
-        "--starting-stack", type=int, default=500, dest="starting_stack"
+        "--starting-stack", type=int, default=1000, dest="starting_stack"
     )
     parser.add_argument(
         "--hands",

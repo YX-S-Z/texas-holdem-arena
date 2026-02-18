@@ -9,13 +9,20 @@ A browser-based Texas Hold'em arena where LLM models (Claude, GPT, Gemini, DeepS
 ### 1. Prerequisites
 
 - Python 3.8+
-- An **OpenRouter API key** — get one free at [openrouter.ai](https://openrouter.ai)
+- An **OpenRouter API key** — get one free at [openrouter.ai](https://openrouter.ai) *(not needed for random/simple bots or data analysis)*
 
 ### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
+
+This installs everything for both the game server and the data analysis pipeline:
+
+| Package | Purpose |
+|---|---|
+| `fastapi`, `uvicorn` | Game server |
+| `pandas`, `numpy`, `matplotlib` | Analysis pipeline |
 
 ---
 
@@ -101,7 +108,7 @@ API_KEY="your-openrouter-api-key-here" \
 | `--hands` | 0 (unlimited) | Stop after this many hands |
 | `--small-blind` | 5 | Small blind amount |
 | `--big-blind` | 10 | Big blind amount |
-| `--starting-stack` | 500 | Starting chips per player |
+| `--starting-stack` | 1000 | Starting chips per player |
 | `--port` | 8000 | Local port for the web UI |
 | `--key` | env `API_KEY` | API key (alternative to env var) |
 
@@ -131,6 +138,59 @@ API_KEY="your-openrouter-api-key-here" \
 | `llama-4` | LLaMA 4 Maverick |
 
 You can also pass any full OpenRouter model ID directly (e.g. `anthropic/claude-sonnet-4-6`).
+
+---
+
+## Data Analysis
+
+After running games, analyze each model's poker strategy and personality.
+No extra setup is needed — `pandas`, `numpy`, and `matplotlib` are already in `requirements.txt`.
+
+### Analyse a specific game folder
+
+```bash
+# Most convenient — use the run script:
+bash analysis/run_analysis.sh data/<game-folder>
+
+# Shorthand for the most recently created game:
+bash analysis/run_analysis.sh latest
+
+# Or call the script directly:
+python analysis/poker_analysis.py --game-dir data/<game-folder>
+```
+
+Output is written **into the same game folder**:
+
+| File | Description |
+|---|---|
+| `report.md` | Full personality + performance report per model |
+| `metrics.csv` | Raw strategy metrics (VPIP, PFR, AF, …) |
+| `action_distribution.png` | Fold / check / call / raise breakdown |
+| `aggression_profile.png` | VPIP vs Aggression Factor — personality quadrant chart |
+| `performance_ranking.png` | Chips-won ranking |
+| `chen_vs_action.png` | Preflop hand strength by action type |
+| `personality_radar.png` | Multi-dimensional radar chart per player |
+| `thinking_keywords.png` | Thinking-log keyword density |
+
+### Analyse all games at once
+
+```bash
+bash analysis/run_analysis.sh
+# or: python analysis/poker_analysis.py
+```
+
+Output is written to `analysis/output/`.
+
+### Personality archetypes
+
+Models are classified into four canonical poker archetypes based on industry-standard metrics (VPIP, PFR, AF):
+
+| Archetype | VPIP | Aggression | Play style |
+|---|---|---|---|
+| **TAG** (Tight-Aggressive) | < 22% | High | Selective entry, strong betting — the "textbook" winning style |
+| **LAG** (Loose-Aggressive) | ≥ 22% | High | Wide range + aggression; high-variance, hard to read |
+| **Nit / Rock** | < 22% | Low | Very selective entry, passive when in hand |
+| **Fish** (Calling Station) | ≥ 22% | Low | Enters many pots but rarely raises; bleeds chips slowly |
 
 ---
 

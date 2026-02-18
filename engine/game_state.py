@@ -40,6 +40,7 @@ class Player:
     seat: int
     stack: int
     folded: bool = False
+    busted: bool = False      # True when player has 0 chips at hand start — sits out
     hole_cards: List[Card] = field(default_factory=list)
     display_name: Optional[str] = None
     current_bet: int = 0      # bet this street (reset each street)
@@ -52,6 +53,7 @@ class Player:
             "seat": self.seat,
             "stack": self.stack,
             "folded": self.folded,
+            "busted": self.busted,
             "current_bet": self.current_bet,
         }
         if self.display_name is not None:

@@ -263,15 +263,16 @@ class GameController:
         self._winners = []
         self._hand_finished = False
         for p in self.players:
-            p.folded = False
+            p.busted = (p.stack == 0)  # permanently out if no chips
+            p.folded = p.busted        # busted players sit out (treated as folded)
             p.hole_cards = []
             p.current_bet = 0
             p.total_committed = 0
         # Dealer button: advance for next hand (round-robin)
         seats = sorted(p.seat for p in self.players)
         self._dealer_seat = seats[(seats.index(self._dealer_seat) + 1) % len(seats)] if self._phase != PHASE_WAITING else seats[0]
-        # Deal 2 cards each
-        order = self._players_in_hand_order(self._dealer_seat + 1)
+        # Deal 2 cards only to players still in the game (stack > 0)
+        order = [p for p in self._players_in_hand_order(self._dealer_seat + 1) if not p.busted]
         for _ in range(2):
             for p in order:
                 if self._deck:

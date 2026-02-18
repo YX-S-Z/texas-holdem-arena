@@ -12,6 +12,7 @@ secrets.txt
 # Personal run scripts that may contain API keys
 scripts/run_arena.sh
 scripts/run_human.sh
+scripts/run_random.sh
 
 # Generated game data
 data/

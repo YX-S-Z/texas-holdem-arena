@@ -1,2 +1,7 @@
 fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
+
+# Analysis pipeline (optional — only needed to run analysis/poker_analysis.py)
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0

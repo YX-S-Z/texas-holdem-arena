@@ -32,10 +32,13 @@ _MODEL_REGISTRY: Dict[str, Tuple[str, str]] = {
     "claude-opus":   ("anthropic/claude-opus-4-6",           "Opus 4.6"),
     "claude-haiku":  ("anthropic/claude-haiku-4-5-20251001", "Haiku 4.5"),
     # ── OpenAI ───────────────────────────────────────────────────────────────
-    "gpt":           ("openai/gpt-5.2",    "GPT 5.2"),
-    "gpt-5":         ("openai/gpt-5",      "GPT 5"),
-    "gpt-5-nano":    ("openai/gpt-5-nano", "GPT 5 Nano"),
-    "gpt-4o":        ("openai/gpt-4o",     "GPT 4o"),
+    "gpt":           ("openai/gpt-5.2",      "GPT 5.2"),
+    "gpt-5.2-chat":  ("openai/gpt-5.2-chat", "GPT 5.2 Chat"),
+    "gpt-5":         ("openai/gpt-5",        "GPT 5"),
+    "gpt-5-nano":    ("openai/gpt-5-nano",   "GPT 5 Nano"),
+    "gpt-5-mini":    ("openai/gpt-5-mini",   "GPT 5 Mini"),
+    "gpt-oss":       ("openai/gpt-oss-120b", "GPT OSS"),
+    "gpt-4o":        ("openai/gpt-4o",       "GPT 4o"),
     # ── Google ───────────────────────────────────────────────────────────────
     "gemini":        ("google/gemini-3-flash-preview", "Gemini 3 Flash"),
     "gemini-pro":    ("google/gemini-3-pro-preview",   "Gemini 3 Pro"),

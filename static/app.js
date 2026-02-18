@@ -897,7 +897,9 @@ if (ARENA_MODE) {
           el("thinking-log").innerHTML = "";
           lastLogKey = null;
           lastThinkingKey = null;
-          window.location.href = "/?game_id=" + data.game_id + "&arena=1";
+          var restartUrl = "/?game_id=" + data.game_id + "&arena=1";
+          if (MAX_HANDS > 0) restartUrl += "&hands=" + MAX_HANDS;
+          window.location.href = restartUrl;
         })
         .catch(function(e) {
           el("message").textContent = "Restart failed: " + (e.message || "error");

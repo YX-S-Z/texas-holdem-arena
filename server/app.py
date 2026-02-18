@@ -13,6 +13,7 @@ from starlette.responses import Response
 
 from engine.game_state import GameConfig, Player
 from engine.game_controller import GameController
+import data_logger
 from .game_session import (
     create_game,
     clone_game,
@@ -24,6 +25,7 @@ from .game_session import (
     is_bot_turn,
     apply_bot_action,
     next_hand,
+    finalize_game_log,
 )
 from .arena_state import (
     get_state as get_arena_state,
@@ -92,10 +94,32 @@ def api_apply_action(game_id: str, body: ActionBody):
     game = get_game(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
+    # Capture pre-action state for logging before the action mutates game state.
+    pre_state = game.get_state(viewer_id=body.player_id)
     try:
         game.apply_action(body.player_id, body.action)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # Log the human player's action.
+    _p_pre = next(
+        (ps for ps in pre_state.get("players", []) if ps["id"] == body.player_id), {}
+    )
+    data_logger.log_action(
+        game_id=game_id,
+        hand_number=get_hands_played(game_id),
+        phase=pre_state.get("phase", ""),
+        player_id=body.player_id,
+        display_name=_p_pre.get("display_name", body.player_id),
+        hole_cards=_p_pre.get("hole_cards") or [],
+        community_cards=pre_state.get("community_cards") or [],
+        pot=pre_state.get("pot", 0),
+        stack=_p_pre.get("stack", 0),
+        current_bet=_p_pre.get("current_bet", 0),
+        action_type=body.action.get("type", "?"),
+        action_amount=body.action.get("amount"),
+        thinking=None,
+        failure_reason=None,
+    )
     state = game.get_state(viewer_id=body.player_id)
     state["last_action"] = get_last_action(game_id)
     state["hands_played"] = get_hands_played(game_id)
@@ -164,6 +188,10 @@ def arena_status():
 @app.post("/arena/finish")
 def arena_finish():
     """Called by arena.py when all hands are done. Signals the browser to show the summary."""
+    # Flush the final hand result (spectator mode: arena.py never calls next_hand after the last hand).
+    arena_state = get_arena_state()
+    if arena_state.get("game_id"):
+        finalize_game_log(arena_state["game_id"])
     set_arena_finished()
     return {"ok": True}
 
@@ -172,6 +200,10 @@ def arena_finish():
 def arena_ack_summary():
     """Called by the browser after it successfully renders the game-over leaderboard.
     arena.py polls /arena/status for summary_shown=True before exiting."""
+    # Flush the final hand result (human mode: next_hand is never called after the last hand).
+    arena_state = get_arena_state()
+    if arena_state.get("game_id"):
+        finalize_game_log(arena_state["game_id"])
     set_arena_summary_shown()
     return {"ok": True}
 

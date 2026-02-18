@@ -9,6 +9,7 @@ from engine.game_controller import GameController
 from bots import create_bot
 from bots.random_bot import RandomBot
 from bots.openrouter_bot import OpenRouterBot, model_display_name, resolve_model
+import data_logger
 
 
 # game_id -> {"controller": ..., "bots": ..., "last_action": ...}
@@ -80,13 +81,16 @@ def create_game(
         for pid in bot_player_ids:
             bots[pid] = None
 
+    data_logger.init_game_log(gid)
+
     _sessions[gid] = {
         "controller": controller,
         "bots": bots,
-        "last_action": None,   # populated by apply_bot_action
-        "hands_played": 0,     # number of completed hands (incremented on next_hand)
-        "bust_order": [],      # [{player_id, display_name, hand_number}] in bust order
-        "failure_stats": {},   # {player_id: {total_moves, timeout, parse_error, api_error}}
+        "last_action": None,        # populated by apply_bot_action
+        "hands_played": 0,          # number of completed hands (incremented on next_hand)
+        "hand_result_logged": False, # True once the current hand's result is written to disk
+        "bust_order": [],           # [{player_id, display_name, hand_number}] in bust order
+        "failure_stats": {},        # {player_id: {total_moves, timeout, parse_error, api_error}}
         "creation_config": {   # stored so the game can be cloned
             "num_players": num_players,
             "small_blind": small_blind,
@@ -183,11 +187,48 @@ def next_hand(game_id: str) -> bool:
     s = _sessions.get(game_id)
     if not s:
         return False
-    _update_bust_order(s)          # capture any busts before starting next hand
+    _log_current_hand_result(game_id, s)   # write hand result before resetting state
+    _update_bust_order(s)                  # capture any busts before starting next hand
     s["hands_played"] += 1
+    s["hand_result_logged"] = False        # ready to log the new hand
     s["controller"].start_hand()
     s["last_action"] = None
     return True
+
+
+def finalize_game_log(game_id: str) -> None:
+    """Log the final hand result when the game ends without a subsequent next_hand call.
+
+    Called from arena_finish (spectator mode) and arena_ack_summary (human mode)
+    so the very last hand is always captured.
+    """
+    s = _sessions.get(game_id)
+    if not s:
+        return
+    _log_current_hand_result(game_id, s)
+
+
+def _log_current_hand_result(game_id: str, s: Dict[str, Any]) -> None:
+    """Write the current hand's result to disk (idempotent via hand_result_logged flag)."""
+    if s.get("hand_result_logged"):
+        return
+    state = s["controller"].get_state()
+    winners = state.get("winners") or []
+    if not winners:
+        return
+    name_map = {p.id: (p.display_name or p.id) for p in s["controller"].players}
+    enriched = [
+        {**w, "display_name": name_map.get(w["player_id"], w["player_id"])}
+        for w in winners
+    ]
+    pot = sum(w.get("amount", 0) for w in winners)
+    data_logger.log_hand_result(
+        game_id=game_id,
+        hand_number=s["hands_played"],
+        winners=enriched,
+        pot=pot,
+    )
+    s["hand_result_logged"] = True
 
 
 def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
@@ -230,15 +271,16 @@ def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
         failure_reason: Optional[str] = None
         raw_response: Optional[str] = None
 
+        # Fetch state once before the action (used for bot decision and logging).
+        pre_state = game.get_state(viewer_id=p.id)
+
         if isinstance(bot, OpenRouterBot):
-            state = game.get_state(viewer_id=p.id)
-            action = bot.decide(state, p.id)
+            action = bot.decide(pre_state, p.id)
             thinking = getattr(bot, "last_thinking", None)
             failure_reason = getattr(bot, "last_failure_reason", None)
             raw_response = getattr(bot, "last_raw_response", None)
         elif isinstance(bot, RandomBot):
-            state = game.get_state(viewer_id=p.id)
-            action = bot.decide(state, p.id)
+            action = bot.decide(pre_state, p.id)
         else:
             action = _simple_action(legal)
 
@@ -250,6 +292,27 @@ def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
             return None
 
         _record_move(s, p.id, failure_reason)
+
+        # Log this action to disk.
+        _player_pre = next(
+            (ps for ps in pre_state.get("players", []) if ps["id"] == p.id), {}
+        )
+        data_logger.log_action(
+            game_id=game_id,
+            hand_number=s["hands_played"],
+            phase=pre_state.get("phase", ""),
+            player_id=p.id,
+            display_name=p.display_name or p.id,
+            hole_cards=_player_pre.get("hole_cards") or [],
+            community_cards=pre_state.get("community_cards") or [],
+            pot=pre_state.get("pot", 0),
+            stack=_player_pre.get("stack", 0),
+            current_bet=_player_pre.get("current_bet", 0),
+            action_type=action.get("type", "?"),
+            action_amount=action.get("amount"),
+            thinking=thinking,
+            failure_reason=failure_reason,
+        )
 
         # Format a human-readable action label
         atype = action.get("type", "?")

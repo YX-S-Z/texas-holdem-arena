@@ -28,36 +28,34 @@ import requests
 
 _MODEL_REGISTRY: Dict[str, Tuple[str, str]] = {
     # ── Anthropic ────────────────────────────────────────────────────────────
-    "claude":        ("anthropic/claude-sonnet-4-6",         "Claude Sonnet"),
-    "claude-sonnet": ("anthropic/claude-sonnet-4-6",         "Claude Sonnet"),
-    "claude-opus":   ("anthropic/claude-opus-4-6",           "Claude Opus"),
-    "claude-haiku":  ("anthropic/claude-haiku-4-5-20251001", "Claude Haiku"),
+    "claude":        ("anthropic/claude-sonnet-4-6",         "Sonnet 4.6"),
+    "claude-opus":   ("anthropic/claude-opus-4-6",           "Opus 4.6"),
+    "claude-haiku":  ("anthropic/claude-haiku-4-5-20251001", "Haiku 4.5"),
     # ── OpenAI ───────────────────────────────────────────────────────────────
-    "gpt":           ("openai/gpt-5.2",    "GPT-5.2"),
-    "gpt-5":         ("openai/gpt-5",      "GPT-5"),
-    "gpt-5-nano":    ("openai/gpt-5-nano", "GPT-5 Nano"),
-    "gpt-4o":        ("openai/gpt-4o",     "GPT-4o"),
+    "gpt":           ("openai/gpt-5.2",    "GPT 5.2"),
+    "gpt-5":         ("openai/gpt-5",      "GPT 5"),
+    "gpt-5-nano":    ("openai/gpt-5-nano", "GPT 5 Nano"),
+    "gpt-4o":        ("openai/gpt-4o",     "GPT 4o"),
     # ── Google ───────────────────────────────────────────────────────────────
     "gemini":        ("google/gemini-3-flash-preview", "Gemini 3 Flash"),
-    "gemini-flash":  ("google/gemini-3-flash-preview", "Gemini 3 Flash"),
     "gemini-pro":    ("google/gemini-3-pro-preview",   "Gemini 3 Pro"),
     # ── Qwen ─────────────────────────────────────────────────────────────────
     "qwen":          ("qwen/qwen3-max", "Qwen3 Max"),
-    "qwen-3.5":     ("qwen/qwen3.5-397b-a17b", "Qwen3.5 397B"),
+    "qwen-3.5":     ("qwen/qwen3.5-397b-a17b", "Qwen3.5"),
     "qwen-32b":      ("qwen/qwen3-32b", "Qwen3 32B"),
     # ── Moonshot ─────────────────────────────────────────────────────────────
     "kimi":          ("moonshotai/kimi-k2.5", "Kimi K2.5"),
     # ── DeepSeek ─────────────────────────────────────────────────────────────
-    "deepseek":      ("deepseek/deepseek-v3.2", "DeepSeek V3.2"),
+    "deepseek":      ("deepseek/deepseek-v3.2", "DeepSeek 3.2"),
     # ── xAI ──────────────────────────────────────────────────────────────────
     "grok":          ("x-ai/grok-4",        "Grok 4"),
-    "grok-fast":     ("x-ai/grok-4.1-fast", "Grok 4.1"),
+    "grok-fast":     ("x-ai/grok-4.1-fast", "Grok 4.1 fast"),
     # ── Minimax ──────────────────────────────────────────────────────────────
     "minimax":       ("minimax/minimax-m2.5", "Minimax M2.5"),
     # ── Z-AI ──────────────────────────────────────────────────────────────────
     "glm-5":    ("z-ai/glm-5", "GLM 5"),
     # ── Meta ──────────────────────────────────────────────────────────────────
-    "llama-4": ("meta-llama/llama-4-maverick", "LLAMA 4 Maverick"),
+    "llama-4": ("meta-llama/llama-4-maverick", "LLAMA 4"),
 }
 
 # Derived: alias → model_id  (used by resolve_model and the arg-parser help text)

@@ -86,8 +86,8 @@ def _evaluate_five(cards: List[Card]) -> Tuple[int, Tuple[int, ...]]:
 
     # Flush
     if is_flush:
-        high_ranks = sorted((-r for r in ranks), reverse=True)[:5]
-        return (HAND_RANK_FLUSH, tuple(-r for r in high_ranks))
+        high_ranks = sorted(ranks, reverse=True)[:5]
+        return (HAND_RANK_FLUSH, tuple(high_ranks))
 
     # Straight
     if is_straight_bool:
@@ -96,7 +96,7 @@ def _evaluate_five(cards: List[Card]) -> Tuple[int, Tuple[int, ...]]:
     # Three of a kind
     if rank_counts[0][0] == 3:
         trip = rank_counts[0][1]
-        kickers = sorted((-rank_counts[i][1] for i in range(1, len(rank_counts))), reverse=True)[:2]
+        kickers = sorted((rank_counts[i][1] for i in range(1, len(rank_counts))), reverse=True)[:2]
         return (HAND_RANK_THREE_OF_A_KIND, (trip,) + tuple(kickers))
 
     # Two pair
@@ -109,12 +109,12 @@ def _evaluate_five(cards: List[Card]) -> Tuple[int, Tuple[int, ...]]:
     # Pair
     if rank_counts[0][0] == 2:
         pair_rank = rank_counts[0][1]
-        kickers = sorted((-rank_counts[i][1] for i in range(1, len(rank_counts))), reverse=True)[:3]
+        kickers = sorted((rank_counts[i][1] for i in range(1, len(rank_counts))), reverse=True)[:3]
         return (HAND_RANK_PAIR, (pair_rank,) + tuple(kickers))
 
     # High card
-    high_ranks = sorted((-r for r in ranks), reverse=True)[:5]
-    return (HAND_RANK_HIGH_CARD, tuple(-r for r in high_ranks))
+    high_ranks = sorted(ranks, reverse=True)[:5]
+    return (HAND_RANK_HIGH_CARD, tuple(high_ranks))
 
 
 def best_hand_from_cards(cards: List[Card]) -> Tuple[List[Card], int, Tuple[int, ...]]:

@@ -158,7 +158,7 @@ def compare_hands(cards_a: List[Card], cards_b: List[Card]) -> int:
 
 def hand_type_name(hand_type: int) -> str:
     names = [
-        "High card", "Pair", "Two pair", "Three of a kind", "Straight",
-        "Flush", "Full house", "Four of a kind", "Straight flush",
+        "high card", "pair", "two pair", "three of a kind", "straight",
+        "flush", "full house", "four of a kind", "straight flush",
     ]
     return names[hand_type] if 0 <= hand_type <= 8 else "Unknown"

@@ -96,7 +96,13 @@ def api_apply_action(game_id: str, body: ActionBody):
         game.apply_action(body.player_id, body.action)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return game.get_state(viewer_id=body.player_id)
+    state = game.get_state(viewer_id=body.player_id)
+    state["last_action"] = get_last_action(game_id)
+    state["hands_played"] = get_hands_played(game_id)
+    state["bust_order"] = get_bust_order(game_id)
+    state["failure_stats"] = get_failure_stats(game_id)
+    state["arena_finished"] = get_arena_state().get("finished", False)
+    return state
 
 
 @app.post("/games/{game_id}/bot_move")
@@ -128,7 +134,13 @@ def api_next_hand(game_id: str, viewer_id: Optional[str] = None):
         raise HTTPException(status_code=404, detail="Game not found")
     if not next_hand(game_id):
         raise HTTPException(status_code=400, detail="Could not start next hand")
-    return game.get_state(viewer_id=viewer_id or "player_0")
+    state = game.get_state(viewer_id=viewer_id or "player_0")
+    state["last_action"] = get_last_action(game_id)
+    state["hands_played"] = get_hands_played(game_id)
+    state["bust_order"] = get_bust_order(game_id)
+    state["failure_stats"] = get_failure_stats(game_id)
+    state["arena_finished"] = get_arena_state().get("finished", False)
+    return state
 
 
 class ArenaRegisterBody(BaseModel):

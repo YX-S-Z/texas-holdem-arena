@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Texas Hold'em Arena</title>
-  <link rel="stylesheet" href="/static/style.css?v=16" />
+  <link rel="stylesheet" href="/static/style.css?v=24" />
 </head>
 <body>
   <div id="app">
@@ -21,33 +21,48 @@
           <option value="7">7</option>
           <option value="8">8</option>
         </select>
-        <button id="btn-new-game">New game</button>
+        <button id="btn-new-game">New Game</button>
         <span id="game-id"></span>
       </div>
     </header>
-    <div id="table-container">
-      <div id="table">
-        <div id="community-cards"></div>
-        <div id="pot">Pot: 0</div>
-        <div id="players"></div>
+
+    <!-- Two-column layout: left = table, right = thinking sidebar (spectator only) -->
+    <div id="main-layout">
+      <div id="left-panel">
+        <div id="tournament-progress" style="display:none">
+          <div id="progress-track">
+            <div id="progress-fill"></div>
+          </div>
+          <span id="progress-label"></span>
+        </div>
+        <div id="table-container">
+          <div id="table">
+            <div id="community-cards"></div>
+            <div id="pot">Pot: 0</div>
+            <div id="players"></div>
+          </div>
+        </div>
+        <div id="actions">
+          <p id="message">Create or join a game to play.</p>
+          <div id="action-buttons"></div>
+        </div>
       </div>
-    </div>
-    <div id="thinking-panel" style="display:none"></div>
-    <div id="thinking-log-container">
-      <div id="thinking-log-header">
-        <span>Thinking log</span>
-        <button id="btn-clear-log">Clear</button>
+
+      <div id="right-panel">
+        <div id="thinking-panel" style="display:none"></div>
+        <div id="thinking-log-container">
+          <div id="thinking-log-header">
+            <span>Thinking log</span>
+            <button id="btn-clear-log">Clear</button>
+          </div>
+          <div id="thinking-log"></div>
+        </div>
       </div>
-      <div id="thinking-log"></div>
-    </div>
-    <div id="actions">
-      <p id="message">Create or join a game to play.</p>
-      <div id="action-buttons"></div>
     </div>
   </div>
   <!-- Game-over summary modal (hidden until game ends) -->
   <div id="game-summary-modal" class="modal-overlay" style="display:none"></div>
 
-  <script src="/static/app.js?v=16"></script>
+  <script src="/static/app.js?v=24"></script>
 </body>
 </html>

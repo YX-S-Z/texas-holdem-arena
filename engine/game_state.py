@@ -42,7 +42,8 @@ class Player:
     folded: bool = False
     hole_cards: List[Card] = field(default_factory=list)
     display_name: Optional[str] = None
-    current_bet: int = 0  # bet this round (for tracking call/raise amounts)
+    current_bet: int = 0      # bet this street (reset each street)
+    total_committed: int = 0  # total chips put in this hand (for side-pot calculation)
 
     def to_public_dict(self, show_hole_cards: bool = False) -> Dict[str, Any]:
         """Serializable dict for API. show_hole_cards: include hole cards only for the viewing player (or all at showdown)."""

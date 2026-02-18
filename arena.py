@@ -248,20 +248,9 @@ def _spectator_loop(base: str, initial_game_id: str, max_hands: int) -> None:
                     reason = "natural game end" if natural_end else f"{hands_played} hand(s)"
                     print(f"\nGame over ({reason}). Signalling browser...")
                     _finish_arena(base)
-                    # Wait until the browser acknowledges that it has rendered the
-                    # leaderboard overlay (it POSTs /arena/ack_summary).  We poll
-                    # /arena/status every second for up to 30 s, then exit anyway.
-                    print("Waiting for browser to display leaderboard... (max 30 s)")
-                    for _ in range(30):
-                        time.sleep(1)
-                        try:
-                            r = requests.get(f"{base}/arena/status", timeout=3)
-                            if r.json().get("summary_shown"):
-                                break
-                        except requests.RequestException:
-                            pass
-                    print("Leaderboard displayed. Exiting.")
-                    sys.exit(0)
+                    print("Leaderboard is live. Server staying up — press Ctrl+C to stop.")
+                    while True:
+                        time.sleep(60)
                 time.sleep(1.0)
                 _next_hand(base, game_id)
                 last_phase = None

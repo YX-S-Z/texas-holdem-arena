@@ -8,6 +8,7 @@ let botMoveInProgress = false;
 // Thinking-panel/log dedup keys
 let lastThinkingKey = null;
 let lastLogKey = null;
+let lastHandResultKey = null;
 
 // Read URL params: ?game_id=xxx&spectator=1&arena=1&hands=N
 var _params = new URLSearchParams(window.location.search);
@@ -26,11 +27,12 @@ function clearGame() {
   raiseOpen = false;
   botMoveInProgress = false;
   lastThinkingKey = null;
+  lastHandResultKey = null;
   el("game-id").textContent = "";
   el("players").innerHTML = "";
   el("community-cards").innerHTML = "";
   el("pot").textContent = "Pot: 0";
-  el("message").textContent = "Game ended or server restarted. Click New game to play.";
+  el("message").textContent = "Game ended or server restarted. Click New Game to play.";
   el("action-buttons").innerHTML = "";
   var modal = el("game-summary-modal");
   if (modal) modal.style.display = "none";
@@ -162,8 +164,7 @@ function renderPlayers(state) {
       if (existing.className !== cls) existing.className = cls;
 
       // Update name + badges
-      var label = p.display_name || p.id;
-      if (!SPECTATOR_MODE && p.id === HUMAN_ID) label += " (You)";
+      var label = (!SPECTATOR_MODE && p.id === HUMAN_ID) ? "Human (You)" : (p.display_name || p.id);
       var badges = "";
       if (i === dealerIdx) badges += '<span class="badge badge-dealer">D</span>';
       if (i === sbIdx) badges += '<span class="badge badge-sb">SB</span>';
@@ -211,8 +212,7 @@ function renderPlayers(state) {
       div.style.top = pos.top;
       div.style.left = pos.left;
 
-      var label = p.display_name || p.id;
-      if (!SPECTATOR_MODE && p.id === HUMAN_ID) label += " (You)";
+      var label = (!SPECTATOR_MODE && p.id === HUMAN_ID) ? "Human (You)" : (p.display_name || p.id);
       var badges = "";
       if (i === dealerIdx) badges += '<span class="badge badge-dealer">D</span>';
       if (i === sbIdx) badges += '<span class="badge badge-sb">SB</span>';
@@ -283,16 +283,30 @@ function renderPot(pot) {
   el("pot").textContent = "Pot: " + pot;
 }
 
+function renderProgress(state) {
+  var container = el("tournament-progress");
+  if (!container || MAX_HANDS <= 0) return;
+  var handNum = Math.min((state.hands_played || 0) + 1, MAX_HANDS);
+  var pct = (handNum / MAX_HANDS) * 100;
+  el("progress-fill").style.width = pct + "%";
+  el("progress-label").textContent = "Hand " + handNum + " / " + MAX_HANDS;
+  container.style.display = "flex";
+}
+
 // ── Game-over summary ─────────────────────────────────────────────────────────
 
 function shouldShowSummary(state) {
   var phase = state.phase;
   if (phase !== "hand_over" && phase !== "showdown") return false;
-  // Arena.py explicitly flagged the session as finished
+  // Arena.py explicitly flagged the session as finished (spectator mode)
   if (state.arena_finished) return true;
-  // Natural end: only 1 player has chips (works outside arena mode too)
+  // Natural end: only 1 player has chips (works in any mode)
   var active = (state.players || []).filter(function(p) { return p.stack > 0; });
   if (active.length <= 1 && (state.players || []).length > 1) return true;
+  // Human arena mode: --hands N limit reached (arena.py doesn't drive hands here)
+  if (ARENA_MODE && !SPECTATOR_MODE && MAX_HANDS > 0) {
+    if ((state.hands_played || 0) + 1 >= MAX_HANDS) return true;
+  }
   return false;
 }
 
@@ -349,7 +363,7 @@ function renderSummary(state) {
 
   ranked.forEach(function(r) {
     var medal = medals[r.rank - 1] || ("#" + r.rank);
-    var name  = r.player.display_name || r.player.id;
+    var name  = (!SPECTATOR_MODE && r.player.id === HUMAN_ID) ? "Human" : (r.player.display_name || r.player.id);
     var pf    = failStats[r.player.id] || {};
     var totalMoves   = pf.total_moves || 0;
     var totalFails   = (pf.timeout || 0) + (pf.parse_error || 0) + (pf.parse_error_rescued || 0) + (pf.api_error || 0);
@@ -395,10 +409,7 @@ function renderSummary(state) {
   modal.innerHTML = html;
   modal.style.display = "flex";
 
-  // Tell arena.py the leaderboard is now visible so it can exit cleanly.
-  if (ARENA_MODE && SPECTATOR_MODE) {
-    fetch(API + "/arena/ack_summary", { method: "POST" }).catch(function(){});
-  }
+  // Nothing to do here — arena.py stays alive and the leaderboard persists.
 
   var playAgainBtn = el("summary-play-again");
   if (playAgainBtn) {
@@ -440,6 +451,19 @@ function _failureBadgeHtml(failureReason) {
   return '<span class="thinking-failure-badge ' + cls + '">' + label + '</span>';
 }
 
+// Action-only summary for the human-mode sidebar (no reasoning, just name → action).
+function _buildActionOnlyHtml(lastAction) {
+  var name = (lastAction.player_id === HUMAN_ID)
+    ? "Human"
+    : (lastAction.display_name || lastAction.player_id || "Bot");
+  var actionLabel = lastAction.action_label || "";
+  var html = '<span class="thinking-name">' + escapeHtml(name) + ':</span>';
+  if (actionLabel) {
+    html += ' <span class="thinking-action">' + escapeHtml(actionLabel) + '</span>';
+  }
+  return html;
+}
+
 function _buildThinkingHtml(lastAction) {
   var name = lastAction.display_name || lastAction.player_id || "Bot";
   var thinking = lastAction.thinking || "";
@@ -461,26 +485,70 @@ function _buildThinkingHtml(lastAction) {
 }
 
 function renderThinking(lastAction) {
-  if (!lastAction) return;  // keep old content visible; never hide between turns
-  var key = _thinkingKey(lastAction);
-  if (key === lastThinkingKey) return;  // same action, skip re-render
-  lastThinkingKey = key;
+  if (!lastAction) return;
 
-  var panel = el("thinking-panel");
-  panel.innerHTML = _buildThinkingHtml(lastAction);
-  panel.style.display = "block";
-
-  appendToThinkingLog(lastAction, key);
+  if (SPECTATOR_MODE) {
+    // Spectator: update the live thinking panel + append to log.
+    var key = _thinkingKey(lastAction);
+    if (key === lastThinkingKey) return;
+    lastThinkingKey = key;
+    var panel = el("thinking-panel");
+    panel.innerHTML = _buildThinkingHtml(lastAction);
+    panel.style.display = "block";
+    appendToThinkingLog(lastAction, key);
+  } else {
+    // Human mode: append action-only entry for every player (no thinking panel).
+    appendToThinkingLog(lastAction, null);
+  }
 }
 
 function appendToThinkingLog(lastAction, key) {
   if (!key) key = _thinkingKey(lastAction);
-  if (key === lastLogKey) return;  // already logged
+  if (key === lastLogKey) return;
   lastLogKey = key;
 
   var entry = document.createElement("div");
   entry.className = "thinking-log-entry";
-  entry.innerHTML = _buildThinkingHtml(lastAction);
+  // Spectator sees full thinking; human sees action label only (no reasoning).
+  entry.innerHTML = SPECTATOR_MODE
+    ? _buildThinkingHtml(lastAction)
+    : _buildActionOnlyHtml(lastAction);
+
+  var log = el("thinking-log");
+  log.appendChild(entry);
+  log.scrollTop = log.scrollHeight;
+}
+
+function appendHandResultToLog(state) {
+  if (state.phase !== "hand_over" && state.phase !== "showdown") return;
+  var winners = state.winners;
+  if (!winners || !winners.length) return;
+
+  // Dedup: key on hands_played + winner ids+amounts
+  var key = "hand|" + (state.hands_played || 0) + "|" +
+            winners.map(function(w) { return w.player_id + "+" + w.amount; }).join(",");
+  if (key === lastHandResultKey) return;
+  lastHandResultKey = key;
+
+  var nameMap = {};
+  (state.players || []).forEach(function(p) {
+    nameMap[p.id] = (!SPECTATOR_MODE && p.id === HUMAN_ID) ? "Human" : (p.display_name || p.id);
+  });
+
+  var parts = winners.map(function(w) {
+    var name = nameMap[w.player_id] || w.player_id;
+    var s = '<span class="thinking-name">' + escapeHtml(name) + '</span>'
+          + ' <span class="thinking-action">+' + w.amount + '</span>';
+    if (w.hand_name) s += ' <span class="thinking-text">(' + escapeHtml(w.hand_name) + ')</span>';
+    return s;
+  });
+
+  var handNum = (state.hands_played || 0) + 1;
+  var label = (MAX_HANDS > 0) ? "Hand " + handNum + "/" + MAX_HANDS : "Hand " + handNum;
+
+  var entry = document.createElement("div");
+  entry.className = "thinking-log-entry hand-result";
+  entry.innerHTML = '<span class="hand-result-label">— ' + label + ' —</span> ' + parts.join(' &amp; ');
 
   var log = el("thinking-log");
   log.appendChild(entry);
@@ -509,16 +577,30 @@ function renderActions(state) {
 
   // Hand over / showdown
   if (state.phase === "hand_over" || state.phase === "showdown") {
+    // Build a player-id → display_name lookup from current state
+    var nameMap = {};
+    (state.players || []).forEach(function(p) { nameMap[p.id] = p.display_name || p.id; });
+
     if (state.winners && state.winners.length) {
       var parts = [];
       for (var i = 0; i < state.winners.length; i++) {
-        parts.push(state.winners[i].player_id + " (+" + state.winners[i].amount + ")");
+        var w = state.winners[i];
+        var wName = nameMap[w.player_id] || w.player_id;
+        // Override player_0 name to "Human" in human mode
+        if (!SPECTATOR_MODE && w.player_id === HUMAN_ID) wName = "Human";
+        var wStr = wName + " (+" + w.amount + ")";
+        if (w.hand_name) wStr += " with " + w.hand_name;
+        parts.push(wStr);
       }
-      msg.textContent = "Winners: " + parts.join(", ");
+      // Show hand progress alongside winner when a limit is set
+      var handNum = (state.hands_played || 0) + 1;
+      var progress = (MAX_HANDS > 0) ? "  [Hand " + handNum + "/" + MAX_HANDS + "]" : "";
+      msg.textContent = "Winner: " + parts.join(", ") + progress;
     } else {
       msg.textContent = "Hand over.";
     }
-    if (!SPECTATOR_MODE) {
+    // Show "Next hand" only when not spectator and the game isn't over yet
+    if (!SPECTATOR_MODE && !shouldShowSummary(state)) {
       var nextBtn = document.createElement("button");
       nextBtn.textContent = "Next hand";
       nextBtn.onclick = function () {
@@ -581,7 +663,7 @@ function renderActions(state) {
 
       var allinBtn = document.createElement("button");
       allinBtn.className = "allin";
-      allinBtn.textContent = "All in (" + maxAmt + ")";
+      allinBtn.textContent = "All In (" + maxAmt + ")";
       allinBtn.onclick = function () {
         raiseOpen = false;
         sendAction({ type: "raise", amount: maxAmt });
@@ -675,7 +757,9 @@ function renderState(state) {
   renderPlayers(state);
   renderCommunity(state.community_cards || []);
   renderPot(state.pot || 0);
+  renderProgress(state);
   renderThinking(state.last_action || null);
+  appendHandResultToLog(state);
   renderActions(state);
 
   // Show summary overlay when the game is over (only once)
@@ -764,6 +848,17 @@ el("btn-clear-log").onclick = function() {
   lastLogKey = null;
 };
 
+// Activate the two-column sidebar layout for both spectator and human modes.
+document.body.classList.add("sidebar-active");
+if (SPECTATOR_MODE) {
+  document.body.classList.add("spectator-mode");
+} else {
+  // Human mode: relabel the sidebar as "Action log" (no reasoning shown).
+  document.body.classList.add("human-mode");
+  var _logHeader = document.querySelector("#thinking-log-header span");
+  if (_logHeader) _logHeader.textContent = "Action log";
+}
+
 // Auto-connect to a game passed via ?game_id= URL param (used by arena.py)
 if (_initialGameId) {
   gameId = _initialGameId;
@@ -786,7 +881,7 @@ if (ARENA_MODE) {
     el("btn-new-game").style.display = "none";
   } else {
     // Human-vs-AI mode: restart game via /arena/restart, navigate to new game.
-    el("btn-new-game").textContent = "New game";
+    el("btn-new-game").textContent = "New Game";
     el("btn-new-game").onclick = function() {
       var sourceId = gameId || _initialGameId;
       if (!sourceId) { newGame(); return; }

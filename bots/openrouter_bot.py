@@ -86,41 +86,52 @@ PARSE_ERROR_MAX_RETRIES = 3
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
-You are an expert Texas Hold'em poker player competing in a multi-player game.
-Your goal is to maximize your chip stack over the long run using sound poker strategy.
+You are a Texas Hold'em poker player. Play to the best of your ability.
+You can only see your own hole cards — other players' cards are hidden.
 
-STRATEGY GUIDELINES:
-- You can only see YOUR OWN hole cards. Other players' cards are hidden.
-- Consider hand strength, pot odds, position, and stack sizes when deciding.
-- Be willing to bluff occasionally, but do not bluff recklessly.
-- Fold weak hands when facing large bets; protect strong hands with raises.
-- Pay attention to opponents' bet sizes and patterns to infer hand strength.
+Respond with brief reasoning, then your chosen action as JSON on the final line.
+No markdown, no code fences. The JSON must be the very last thing you write.
 
-OUTPUT FORMAT — you must follow this exactly on every turn:
-  Line 1:    One sentence of reasoning (your strategic thought process).
-  Last line: Your chosen action as a plain JSON object.
+JSON format:
+  {"action": "fold"}
+  {"action": "check"}
+  {"action": "call"}
+  {"action": "raise", "amount": <integer>}
 
-STRICT JSON RULES:
-  - The required key is "action". Its value must be one of: "fold", "check", "call", "raise".
-  - For "raise" you must also include "amount" as an integer.
-  - Do NOT use the word "bet" — the correct term is "raise".
-  - Do NOT wrap the JSON in markdown code fences (no backticks, no ```json).
-  - Nothing may appear after the JSON — it must be the absolute last line.
+Examples:
 
-EXAMPLES (one reasoning sentence, then JSON, nothing else after):
-
-Strong hand preflop — raise for value.
+My hand is strong preflop.
 {"action": "raise", "amount": 80}
 
-Weak holding facing a large bet — fold to preserve chips.
+I'm behind and the pot odds don't justify calling.
 {"action": "fold"}
 
-No bet to call and hand isn't strong enough to raise — take the free card.
+No bet to face — I'll take the free card.
 {"action": "check"}
 
-Reasonable pot odds to continue drawing — call.
+Good pot odds to continue.
 {"action": "call"}
 """
+
+# ---------------------------------------------------------------------------
+# Parser helpers — module-level for clarity
+# ---------------------------------------------------------------------------
+
+# Alternative key names LLMs sometimes use instead of "action"
+_ACTION_KEY_ALIASES = ("action", "move", "decision", "play", "choice", "type")
+
+# Synonym map → canonical engine action name
+_ACTION_SYNONYMS: Dict[str, str] = {
+    "fold":  "fold",
+    "check": "check",
+    "call":  "call",
+    "raise": "raise",
+    "bet":   "raise",   # very common poker synonym
+    "pass":  "check",   # occasional alias for check
+    "allin": "raise",
+    "all-in": "raise",
+    "all_in": "raise",
+}
 
 
 def resolve_model(alias: str) -> str:
@@ -284,7 +295,7 @@ class OpenRouterBot:
             "Available actions (copy the JSON exactly, fill in N for raise):",
             *action_lines,
             "",
-            "Write one sentence of reasoning, then your chosen JSON on the final line:",
+            "Reason briefly, then output your chosen JSON on the final line:",
         ]
         return "\n".join(lines)
 
@@ -337,49 +348,135 @@ class OpenRouterBot:
     def _parse_response(
         self, text: str, legal: List[Dict[str, Any]]
     ) -> Optional[Dict[str, Any]]:
-        """Extract JSON from LLM response and validate against legal actions."""
-        # Strip markdown code fences that many models add
-        cleaned = re.sub(r"```(?:json)?\s*", "", text)
-        cleaned = cleaned.replace("```", "")
+        """
+        Fuzzy extraction of a legal poker action from raw LLM output.
 
-        # Grab the LAST {...} block — reasoning text before it may contain braces
-        matches = re.findall(r"\{[^{}]+\}", cleaned)
-        if not matches:
-            return None
-        try:
-            data = json.loads(matches[-1])
-        except json.JSONDecodeError:
-            return None
-
-        action_type = data.get("action")
-        if not action_type:
-            return None
-
-        # Normalize common LLM mistakes
-        if action_type == "bet":
-            action_type = "raise"
-
+        Strategy (in order):
+          1. Strip markdown fences.
+          2. Find all {...} blocks; try each from last to first, with both
+             standard JSON and a single-quote fallback.
+          3. If no JSON block yields an action, scan the last few lines of
+             plain text for action keywords (last resort before guardrail).
+        """
         legal_types = {a["type"] for a in legal}
-        if action_type not in legal_types:
+
+        # 1. Strip markdown code fences
+        cleaned = re.sub(r"```(?:json)?\s*", "", text).replace("```", "")
+
+        # 2. Try every {...} block, last-first (JSON is asked to be at the end)
+        for candidate in reversed(re.findall(r"\{[^{}]+\}", cleaned)):
+            action = self._try_json_block(candidate, legal_types, legal)
+            if action:
+                return action
+            # Single-quote fallback for models that write {'action': 'fold'}
+            action = self._try_json_block(candidate.replace("'", '"'), legal_types, legal)
+            if action:
+                return action
+
+        # 3. No valid JSON found — try plain-text keyword scan
+        return self._extract_from_plain_text(cleaned, legal_types, legal)
+
+    def _try_json_block(
+        self,
+        candidate: str,
+        legal_types: set,
+        legal: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Attempt to extract a valid action from one JSON-like string."""
+        try:
+            data = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
             return None
 
+        # Find the action value — tolerate alternative key names
+        raw_value = None
+        for key in _ACTION_KEY_ALIASES:
+            val = data.get(key)
+            if val and isinstance(val, str):
+                raw_value = val.strip().lower()
+                break
+        if not raw_value:
+            return None
+
+        # Normalise synonyms and handle compound values like "raise 80"
+        amount_hint: Optional[int] = None
+        action_type = _ACTION_SYNONYMS.get(raw_value)
+        if action_type is None and " " in raw_value:
+            # e.g. "raise to 80", "bet 120", "fold now"
+            first_word = raw_value.split()[0]
+            action_type = _ACTION_SYNONYMS.get(first_word)
+            m = re.search(r"\d+", raw_value)
+            if m:
+                amount_hint = int(m.group())
+        if not action_type or action_type not in legal_types:
+            return None
+
+        # Resolve amount: prefer explicit JSON field, then hint from compound value
         if action_type == "raise":
+            raw_amount = data.get("amount") or data.get("bet") or amount_hint
+            if isinstance(raw_amount, str):
+                m = re.search(r"\d+", raw_amount)
+                raw_amount = int(m.group()) if m else None
             raise_info = next((a for a in legal if a["type"] == "raise"), None)
             if raise_info is None:
                 return None
-            amount = data.get("amount", raise_info["min_amount"])
-            amount = int(amount)
-            amount = max(raise_info["min_amount"], min(raise_info["max_amount"], amount))
-            return {"type": "raise", "amount": amount}
+            amt = int(raw_amount) if raw_amount is not None else raise_info["min_amount"]
+            amt = max(raise_info["min_amount"], min(raise_info["max_amount"], amt))
+            return {"type": "raise", "amount": amt}
 
         if action_type == "call":
             call_info = next((a for a in legal if a["type"] == "call"), None)
-            if call_info is None:
-                return None
-            return {"type": "call", "amount": call_info["amount"]}
+            return {"type": "call", "amount": call_info["amount"]} if call_info else None
 
-        if action_type in ("check", "fold"):
-            return {"type": action_type}
+        return {"type": action_type}  # fold / check
+
+    def _extract_from_plain_text(
+        self,
+        text: str,
+        legal_types: set,
+        legal: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Absolute last resort before the guardrail: scan the final 3 lines of
+        the response for a recognisable poker action keyword or raise amount.
+        Only the tail of the text is checked so that reasoning mentions of
+        actions (e.g. "I considered folding…") don't pollute the result.
+        """
+        tail = "\n".join(text.strip().splitlines()[-3:]).lower()
+
+        # Raise/bet with explicit amount (most specific — try first)
+        if "raise" in legal_types:
+            m = re.search(r"\b(?:raise|bet)\s+(?:to\s+)?(\d+)", tail)
+            if m:
+                raise_info = next((a for a in legal if a["type"] == "raise"), None)
+                if raise_info:
+                    amt = max(raise_info["min_amount"],
+                              min(raise_info["max_amount"], int(m.group(1))))
+                    return {"type": "raise", "amount": amt}
+
+        # Simple keyword scan in priority order
+        for action in ("fold", "check", "call", "raise"):
+            if action not in legal_types:
+                continue
+            if re.search(rf"\b{action}\b", tail):
+                if action == "call":
+                    call_info = next((a for a in legal if a["type"] == "call"), None)
+                    return {"type": "call", "amount": call_info["amount"]} if call_info else None
+                if action == "raise":
+                    raise_info = next((a for a in legal if a["type"] == "raise"), None)
+                    if raise_info:
+                        return {"type": "raise", "amount": raise_info["min_amount"]}
+                    continue
+                return {"type": action}
+
+        # "bet" as synonym for raise
+        if "raise" in legal_types and re.search(r"\bbet\b", tail):
+            raise_info = next((a for a in legal if a["type"] == "raise"), None)
+            if raise_info:
+                m = re.search(r"\bbet\s+(?:to\s+)?(\d+)", tail)
+                amt = int(m.group(1)) if m else raise_info["min_amount"]
+                amt = max(raise_info["min_amount"], min(raise_info["max_amount"], amt))
+                return {"type": "raise", "amount": amt}
 
         return None
 

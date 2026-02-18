@@ -50,11 +50,49 @@ header h1 { margin: 0; font-size: 1.5rem; }
   border: 1px solid #4a7a4a;
   border-radius: 6px;
   cursor: pointer;
+  font-weight: bold;
 }
 
 #controls button:hover { background: #3a6a3a; }
 
 #game-id { font-size: 0.9rem; opacity: 0.9; }
+
+/* ── Tournament progress bar ──────────────────────────────────────── */
+
+#tournament-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+#progress-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+#progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #b8952a, #f0d060, #b8952a);
+  background-size: 200% 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+#progress-label {
+  font-size: 0.82rem;
+  font-weight: bold;
+  color: #d4af37;
+  white-space: nowrap;
+  min-width: 90px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 #table-container {
   background: #14491a;
@@ -312,6 +350,19 @@ header h1 { margin: 0; font-size: 1.5rem; }
 
 .thinking-log-entry:last-child { border-bottom: none; }
 
+.thinking-log-entry.hand-result {
+  border-top: 1px solid rgba(255,255,255,0.12);
+  margin-top: 0.2rem;
+  padding-top: 0.35rem;
+}
+
+.hand-result-label {
+  font-size: 0.75rem;
+  color: #888;
+  margin-right: 0.4rem;
+  font-style: italic;
+}
+
 #actions {
   margin-top: 1rem;
   padding: 1rem 0.5rem 0;
@@ -332,6 +383,7 @@ header h1 { margin: 0; font-size: 1.5rem; }
   border: 1px solid #4a7a4a;
   border-radius: 6px;
   cursor: pointer;
+  font-weight: bold;
 }
 
 #action-buttons button:hover { background: #3a6a3a; }
@@ -500,3 +552,56 @@ header h1 { margin: 0; font-size: 1.5rem; }
 }
 
 .summary-buttons button.primary:hover { background: #e0c040; }
+
+/* ── Sidebar two-column layout (spectator + human mode) ─────────────────── */
+
+body.sidebar-active #app {
+  max-width: 1500px;
+}
+
+#main-layout {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+
+#left-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+#right-panel {
+  display: none; /* hidden until a mode activates it */
+}
+
+body.sidebar-active #right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 420px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 1rem;
+  /* Cap at roughly the table height so it never overflows the viewport */
+  max-height: 620px;
+}
+
+/* In the sidebar the thinking panel needs no top margin */
+body.sidebar-active #thinking-panel {
+  margin-top: 0;
+}
+
+/* Log container fills remaining sidebar space and clips overflow */
+body.sidebar-active #thinking-log-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-top: 0;
+}
+
+body.sidebar-active #thinking-log {
+  flex: 1;
+  max-height: none; /* parent container clips; no separate cap needed */
+  overflow-y: auto;
+}

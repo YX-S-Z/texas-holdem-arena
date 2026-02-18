@@ -18,7 +18,7 @@ from .game_state import (
     PHASE_WAITING,
     Player,
 )
-from .hand_evaluator import best_hand_from_cards, compare_hands
+from .hand_evaluator import best_hand_from_cards, compare_hands, hand_type_name
 
 
 @dataclass
@@ -103,11 +103,40 @@ class GameController:
             return False
         return True  # no eligible player found
 
+    def _compute_side_pots(self) -> List[Dict[str, Any]]:
+        """Compute side pots from each player's total_committed.
+
+        Returns a list of {"amount": int, "eligible": [Player]}, ordered from
+        the main pot (lowest all-in level) to the largest side pot.
+        Folded players' chips are included in the amounts but they are never
+        eligible to win.
+        """
+        non_folded = [p for p in self.players if not p.folded]
+        if not non_folded:
+            return []
+        # Unique commitment levels among non-folded players, sorted ascending.
+        levels = sorted(set(p.total_committed for p in non_folded))
+        side_pots: List[Dict[str, Any]] = []
+        prev = 0
+        for level in levels:
+            # Every player (including folded) contributes up to this level.
+            amount = sum(
+                min(p.total_committed, level) - min(p.total_committed, prev)
+                for p in self.players
+            )
+            eligible = [p for p in non_folded if p.total_committed >= level]
+            if amount > 0:
+                side_pots.append({"amount": amount, "eligible": eligible})
+            prev = level
+        return side_pots
+
     def _run_showdown(self) -> None:
-        """Set winners and pay pot(s). Single pot only for v1."""
+        """Award pot(s) to winner(s), respecting side pots for all-in players."""
         active = self._active_players()
         if not active:
             return
+
+        # Fast path: only one non-folded player left (others folded).
         if len(active) == 1:
             winner = active[0]
             winner.stack += self._pot
@@ -116,22 +145,48 @@ class GameController:
             self._phase = PHASE_HAND_OVER
             self._hand_finished = True
             return
-        all_cards = [p.hole_cards + self._community_cards for p in active]
-        best_idx = 0
-        for i in range(1, len(active)):
-            if compare_hands(all_cards[best_idx], all_cards[i]) == 1:
-                best_idx = i
-        winners = [active[best_idx]]
-        for i in range(len(active)):
-            if i != best_idx and compare_hands(all_cards[best_idx], all_cards[i]) == 0:
-                winners.append(active[i])
-        split = self._pot // len(winners)
-        remainder = self._pot % len(winners)
-        for i, p in enumerate(winners):
-            p.stack += split + (1 if i < remainder else 0)
+
+        side_pots = self._compute_side_pots()
+        winnings: Dict[str, int] = {}   # player_id -> total chips won
+        hand_names: Dict[str, str] = {} # player_id -> hand description
+
+        for pot in side_pots:
+            eligible: List[Player] = pot["eligible"]
+            amount: int = pot["amount"]
+            if not eligible:
+                continue
+            # Only one eligible player (everyone else folded or had less committed).
+            if len(eligible) == 1:
+                p = eligible[0]
+                p.stack += amount
+                winnings[p.id] = winnings.get(p.id, 0) + amount
+                continue
+            # Find the best hand among eligible players.
+            all_cards = [p.hole_cards + self._community_cards for p in eligible]
+            best_idx = 0
+            for i in range(1, len(eligible)):
+                if compare_hands(all_cards[best_idx], all_cards[i]) == 1:
+                    best_idx = i
+            pot_winners = [eligible[best_idx]]
+            for i in range(len(eligible)):
+                if i != best_idx and compare_hands(all_cards[best_idx], all_cards[i]) == 0:
+                    pot_winners.append(eligible[i])
+            split = amount // len(pot_winners)
+            remainder = amount % len(pot_winners)
+            for i, p in enumerate(pot_winners):
+                won = split + (1 if i < remainder else 0)
+                p.stack += won
+                winnings[p.id] = winnings.get(p.id, 0) + won
+            # Record hand name for each winner of this pot.
+            winner_cards = eligible[best_idx].hole_cards + self._community_cards
+            _, best_type, _ = best_hand_from_cards(winner_cards)
+            hname = hand_type_name(best_type)
+            for p in pot_winners:
+                hand_names[p.id] = hname
+
         self._winners = [
-            {"player_id": p.id, "amount": split + (1 if i < remainder else 0)}
-            for i, p in enumerate(winners)
+            {"player_id": pid, "amount": amt, "hand_name": hand_names.get(pid, "")}
+            for pid, amt in winnings.items()
         ]
         self._pot = 0
         self._phase = PHASE_HAND_OVER
@@ -151,6 +206,8 @@ class GameController:
         bb_player.stack -= bb_amt
         sb_player.current_bet = sb_amt
         bb_player.current_bet = bb_amt
+        sb_player.total_committed += sb_amt
+        bb_player.total_committed += bb_amt
         self._pot = sb_amt + bb_amt
         self._current_bet_this_round = bb_amt
         # Nobody has voluntarily acted yet; blinds are forced
@@ -209,6 +266,7 @@ class GameController:
             p.folded = False
             p.hole_cards = []
             p.current_bet = 0
+            p.total_committed = 0
         # Dealer button: advance for next hand (round-robin)
         seats = sorted(p.seat for p in self.players)
         self._dealer_seat = seats[(seats.index(self._dealer_seat) + 1) % len(seats)] if self._phase != PHASE_WAITING else seats[0]
@@ -269,6 +327,7 @@ class GameController:
             amt = min(to_call, p.stack)
             p.stack -= amt
             p.current_bet += amt
+            p.total_committed += amt
             self._pot += amt
         elif action_type == "raise":
             amount = action.get("amount")
@@ -279,6 +338,7 @@ class GameController:
                 raise ValueError("Invalid raise amount")
             p.stack -= amount
             p.current_bet += amount
+            p.total_committed += amount
             self._pot += amount
             self._current_bet_this_round = p.current_bet
             # A raise reopens betting: only the raiser has "acted" at this new level

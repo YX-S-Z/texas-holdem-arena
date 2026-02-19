@@ -75,9 +75,18 @@ def _game_dir(game_id: str) -> str:
 
 
 def _init(game_id: str) -> None:
-    """Create the timestamped folder for game_id and register it."""
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    folder = os.path.join(DATA_DIR, f"{ts}_{game_id}")
+    """Create the folder for game_id and register it.
+
+    If the environment variable ARENA_GAME_DIR is set, that path is used
+    directly (used by batch runs to place each game inside a shared folder).
+    Otherwise a timestamped folder is created under data/.
+    """
+    env_dir = os.environ.get("ARENA_GAME_DIR")
+    if env_dir:
+        folder = os.path.abspath(env_dir)
+    else:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        folder = os.path.join(DATA_DIR, f"{ts}_{game_id}")
     os.makedirs(folder, exist_ok=True)
     _game_dirs[game_id] = folder
 

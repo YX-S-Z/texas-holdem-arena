@@ -13,6 +13,7 @@ secrets.txt
 scripts/run_arena.sh
 scripts/run_human.sh
 scripts/run_random.sh
+scripts/run_batch.sh
 
 # Generated game data
 data/

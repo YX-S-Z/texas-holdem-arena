@@ -55,8 +55,6 @@ API_KEY="your-openrouter-api-key-here" \
   --hands 25
 ```
 
-This is equivalent to running `scripts/run_arena.sh` with your key substituted in.
-
 What happens:
 - A browser tab opens automatically at `http://127.0.0.1:8000`
 - All 8 models play 25 hands autonomously
@@ -75,8 +73,6 @@ API_KEY="your-openrouter-api-key-here" \
   --hands 2 \
   --port 8001
 ```
-
-This is equivalent to running `scripts/run_human.sh` with your key substituted in.
 
 What happens:
 - A browser tab opens at `http://127.0.0.1:8001`
@@ -104,26 +100,29 @@ API_KEY="your-openrouter-api-key-here" \
 
 | Flag | Default | Description |
 |---|---|---|
-| `--players` | `human claude` | Ordered seat list (see models below) |
+| `--players` | `human claude` | Ordered seat list, 2–10 players (see models below) |
 | `--hands` | 0 (unlimited) | Stop after this many hands |
 | `--small-blind` | 5 | Small blind amount |
 | `--big-blind` | 10 | Big blind amount |
 | `--starting-stack` | 1000 | Starting chips per player |
 | `--port` | 8000 | Local port for the web UI |
 | `--key` | env `API_KEY` | API key (alternative to env var) |
-| `--screenshots` | off | Spectator mode only: capture a PNG after every action (see below) |
+| `--screenshots` | off | Capture a PNG after every action and render a `game.mp4` at the end (see below) |
+| `--auto-exit` | off | Exit automatically when all hands finish — useful for scripted/batch runs |
+| `--no-browser` | off | Skip opening a browser window — useful for headless/batch runs |
 
 ---
 
-## Screenshot capture (spectator mode)
+## Screenshot capture & video rendering
 
-Add `--screenshots` to capture the browser UI after every action — useful for assembling a demo video.
+Add `--screenshots` to capture the browser UI after every action and automatically render an MP4 video at the end.
 
 ### One-time setup
 
 ```bash
 pip install playwright
 playwright install chromium
+brew install ffmpeg        # macOS; or apt install ffmpeg on Linux
 ```
 
 ### Usage
@@ -135,25 +134,27 @@ API_KEY="your-openrouter-api-key-here" \
   --screenshots
 ```
 
+Works in both spectator (all-AI) and human-vs-AI mode.
+
 ### Output
 
-Screenshots are saved to **`data/<run-folder>/game_states_figs/`** alongside the CSV logs:
+Screenshots and a rendered video are saved alongside the CSV logs:
 
 ```
-game_states_figs/
-  0001_initial.png                        # empty table before first action
-  0002_h01-preflop-gemini-3-flash.png     # Gemini just acted in hand 1, preflop
-  0003_h01-preflop-deepseek-v3-2.png
-  ...
-  0041_h01-showdown.png                   # winner announced
-  0042_h02-preflop-claude-sonnet-4-6.png  # hand 2 begins
-  ...
-  NNNN_leaderboard.png                    # final leaderboard overlay
+data/<run-folder>/
+  game_states_figs/
+    0001_initial.png                        # empty table before first action
+    0002_h01-preflop-gemini-3-flash.png     # Gemini just acted in hand 1, preflop
+    0003_h01-preflop-deepseek-v3-2.png
+    ...
+    0041_h01-showdown.png                   # winner announced
+    0042_h02-preflop-claude-sonnet-4-6.png  # hand 2 begins
+    ...
+    NNNN_leaderboard.png                    # final leaderboard overlay
+  game.mp4                                  # ← auto-rendered video (1 fps)
 ```
 
-Each file is prefixed with a zero-padded counter so frames sort naturally for `ffmpeg` or any slideshow tool.
-
-> **Note:** `--screenshots` only works in spectator mode (all-AI games). The headless Chromium browser runs in parallel with the visible browser, so you see the game live while screenshots are captured silently.
+Each PNG is prefixed with a zero-padded counter so frames sort naturally. The MP4 is rendered automatically via ffmpeg when the game ends — one second per frame.
 
 ---
 

@@ -214,8 +214,9 @@ class OpenRouterBot:
                 self.last_failure_reason = "parse_error"
         except requests.exceptions.Timeout:
             self.last_failure_reason = "timeout"
-        except Exception:
+        except Exception as exc:
             self.last_failure_reason = "api_error"
+            print(f"[bot:{self.display_name}] api_error: {exc}")
 
         return action if action is not None else self._fallback_action(legal)
 
@@ -333,7 +334,7 @@ class OpenRouterBot:
                 {"role": "user",   "content": user_message},
             ],
             "temperature": 0.7,
-            "max_tokens": 500,
+            "max_tokens": 1000,
         }
         resp = requests.post(
             OPENROUTER_URL, headers=headers, json=body, timeout=REQUEST_TIMEOUT
@@ -518,7 +519,7 @@ class OpenRouterBot:
             "model": GUARDRAIL_MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
-            "max_tokens": 500,
+            "max_tokens": 1000,
         }
         try:
             resp = requests.post(

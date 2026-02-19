@@ -129,10 +129,17 @@ def _get_state(base: str, game_id: str) -> dict:
 
 
 def _bot_move(base: str, game_id: str) -> bool:
-    """Trigger one bot action. Returns True on success, False on timeout/error."""
+    """Trigger one bot action.
+
+    Returns True when an action was actually applied to the game state.
+    Returns False on network timeout/error, or when the server was already
+    processing a previous bot_move (lock contention — action_applied=False).
+    Callers should only take a screenshot when this returns True.
+    """
     try:
-        # 120s: LLM API calls can be legitimately slow; give them room to breathe.
-        r = requests.post(f"{base}/games/{game_id}/bot_move", timeout=120)
+        # 300s: covers the server's worst-case retry cycle
+        # (4 LLM attempts × 45s read timeout + 1 guardrail call ≈ 225s total).
+        r = requests.post(f"{base}/games/{game_id}/bot_move", timeout=300)
         data = r.json() if r.ok else {}
         la = data.get("last_action") or {}
         fr = la.get("failure_reason")
@@ -142,7 +149,9 @@ def _bot_move(base: str, game_id: str) -> bool:
             raw = la.get("raw_response")
             if raw:
                 print(f"[arena]   raw LLM output: {raw}")
-        return True
+        # action_applied=False means the server lock was contended (a previous
+        # long-running LLM call is still in progress) — no state change occurred.
+        return bool(data.get("action_applied", False))
     except requests.exceptions.ReadTimeout:
         print("[arena] bot_move timed out waiting for LLM — skipping turn")
         return False

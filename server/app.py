@@ -135,13 +135,17 @@ def api_bot_move(game_id: str, viewer_id: Optional[str] = None):
     game = get_game(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    apply_bot_action(game_id)
+    result = apply_bot_action(game_id)
     state = game.get_state(viewer_id=viewer_id or "player_0")
     state["last_action"] = get_last_action(game_id)
     state["hands_played"] = get_hands_played(game_id)
     state["bust_order"] = get_bust_order(game_id)
     state["failure_stats"] = get_failure_stats(game_id)
     state["arena_finished"] = get_arena_state().get("finished", False)
+    # True when an action was actually applied; False when the lock was contended
+    # (another call is in-flight) or no bot turn is pending.  arena.py uses this
+    # to skip screenshots when the game state has not actually advanced.
+    state["action_applied"] = result is not None
     return state
 
 

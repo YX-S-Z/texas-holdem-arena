@@ -110,8 +110,8 @@ function seatPosition(playerIndex, totalPlayers) {
   //   ry: 43→37  – prevents top/bottom seats from clipping off the table;
   //                the taller table (620px) + compact player cards compensate
   //                for the reduced vertical spread on the side pairs (P2/P3, P7/P8).
-  var rx = totalPlayers >= 9 ? 40 : 44; // horizontal radius in %
-  var ry = totalPlayers >= 9 ? 37 : 43; // vertical radius in %
+  var rx = totalPlayers >= 9 ? 42 : 44; // horizontal radius in %
+  var ry = totalPlayers >= 9 ? 38 : 43; // vertical radius in %
   // Push diagonal seats (corners) further out so they don't overlap neighbors.
   // diagonalness is 1.0 at 45/135/225/315° and 0.0 at 0/90/180/270°.
   var diagonalness = Math.abs(Math.sin(2 * angle));
@@ -125,7 +125,7 @@ function seatPosition(playerIndex, totalPlayers) {
   // to prevent overlap without shrinking the cards.
   // Nudge direction: below-centre seats move down (+), above-centre move up (−).
   if (totalPlayers === 10) {
-    var nudges10 = [0, 0, 4, -4, 0, 0, 0, -4, 4, 0];
+    var nudges10 = [0, 0, 5, -5, 0, 0, 0, -5, 5, 0];
     top += nudges10[playerIndex] || 0;
   }
 

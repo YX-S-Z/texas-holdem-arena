@@ -14,13 +14,13 @@ class GameConfig:
     small_blind: int = 1
     big_blind: int = 2
     min_players: int = 2
-    max_players: int = 8
+    max_players: int = 10
     starting_stack: int = 1000
     min_raise: Optional[int] = None  # None = big blind
 
     def __post_init__(self) -> None:
-        if self.min_players < 2 or self.max_players > 8:
-            raise ValueError("Players must be between 2 and 8")
+        if self.min_players < 2 or self.max_players > 10:
+            raise ValueError("Players must be between 2 and 10")
         if self.min_players > self.max_players:
             raise ValueError("min_players must be <= max_players")
         if self.small_blind <= 0 or self.big_blind < self.small_blind:

@@ -388,8 +388,8 @@ def main() -> None:
     spectator = not has_human
 
     # --- Validate ---
-    if num_players < 2 or num_players > 8:
-        parser.error("Need between 2 and 8 players.")
+    if num_players < 2 or num_players > 10:
+        parser.error("Need between 2 and 10 players.")
 
     if has_human and players[0] != "human":
         parser.error('"human" must be the first player (seat 0 = player_0).')

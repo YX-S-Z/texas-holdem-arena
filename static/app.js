@@ -105,8 +105,11 @@ function seatPosition(playerIndex, totalPlayers) {
   // Formula:
   //   left = 50 - rx * sin(angle)
   //   top  = 50 + ry * cos(angle)
-  var rx = 44; // horizontal radius in %
-  var ry = 43; // vertical radius in %
+  // For 9–10 players reduce rx to avoid left-edge clipping and increase ry
+  // to maintain vertical clearance between the two left-side and right-side pairs
+  // that share the same horizontal position at 36° spacing.
+  var rx = totalPlayers >= 9 ? 40 : 44; // horizontal radius in %
+  var ry = totalPlayers >= 9 ? 44 : 43; // vertical radius in %
   // Push diagonal seats (corners) further out so they don't overlap neighbors.
   // diagonalness is 1.0 at 45/135/225/315° and 0.0 at 0/90/180/270°.
   var diagonalness = Math.abs(Math.sin(2 * angle));

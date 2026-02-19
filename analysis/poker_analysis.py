@@ -13,6 +13,7 @@ Output (in analysis/output/):
     action_distribution.png — Stacked action breakdown per player
     aggression_profile.png  — VPIP vs AF scatter (personality quadrants)
     performance_ranking.png — Net chips ranking
+    bluff_proxy_ranking.png — Strength-based bluff proxy % (postflop bet/raise with high card)
     chen_vs_action.png      — Preflop hand strength (Chen) by action type
     personality_radar.png   — Multi-dimensional radar chart
     thinking_keywords.png   — Thinking log keyword density analysis
@@ -46,6 +47,17 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DATA_DIR   = SCRIPT_DIR.parent / "data"
 OUT_DIR    = SCRIPT_DIR / "output"
 OUT_DIR.mkdir(exist_ok=True)
+
+# Engine for hand evaluation (strength-based bluff proxy)
+sys.path.insert(0, str(SCRIPT_DIR.parent))
+try:
+    from engine.cards import card_from_code
+    from engine.hand_evaluator import best_hand_from_cards
+    HAND_EVAL_AVAILABLE = True
+except ImportError:
+    HAND_EVAL_AVAILABLE = False
+    card_from_code = None
+    best_hand_from_cards = None
 
 # ── Card / Chen Formula Utilities ─────────────────────────────────────────────
 RANK_MAP = {
@@ -127,6 +139,38 @@ def chen_score(card_str: str) -> float:
             score += 1
 
     return round(score, 1)
+
+
+def _hand_type_at_action(hole_str: str, community_str: str) -> int | None:
+    """
+    Return hand type (0=high card, 1=pair, ..., 8=straight flush) at a given moment
+    using hole_cards + community_cards. Used for strength-based bluff proxy.
+    Returns None if evaluation is not possible (e.g. preflop or invalid cards).
+    """
+    if not HAND_EVAL_AVAILABLE or card_from_code is None or best_hand_from_cards is None:
+        return None
+    hole_str = (hole_str or "").strip()
+    community_str = (community_str or "").strip()
+    if not hole_str:
+        return None
+    codes = [p.strip() for p in hole_str.split() + community_str.split() if p.strip()]
+    if len(codes) < 5:
+        return None
+    cards = []
+    for c in codes:
+        if len(c) != 2:
+            continue
+        try:
+            cards.append(card_from_code(c))
+        except (ValueError, TypeError):
+            continue
+    if len(cards) < 5:
+        return None
+    try:
+        _, hand_type, _ = best_hand_from_cards(cards)
+        return hand_type
+    except Exception:
+        return None
 
 
 # ── Data Loading ──────────────────────────────────────────────────────────────
@@ -275,6 +319,23 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
         ).dropna()
         avg_raise = raise_amts.mean() if len(raise_amts) > 0 else 0.0
 
+        # ── Strength-based bluff proxy (postflop bet/raise with high card only) ─
+        n_bet_raise_postflop = 0
+        n_bet_raise_weak_hand = 0
+        if HAND_EVAL_AVAILABLE:
+            for _, row in postflop_raises.iterrows():
+                hole = row.get("hole_cards") or ""
+                comm = row.get("community_cards") or ""
+                ht = _hand_type_at_action(str(hole), str(comm))
+                if ht is not None:
+                    n_bet_raise_postflop += 1
+                    if ht == 0:
+                        n_bet_raise_weak_hand += 1
+        strength_bluff_pct = (
+            n_bet_raise_weak_hand / n_bet_raise_postflop * 100
+            if n_bet_raise_postflop > 0 else float("nan")
+        )
+
         # ── LLM quality — error type breakdown ────────────────────────────
         err = pa["failure_reason"].fillna("")
         n_parse_error          = (err == "parse_error").sum()
@@ -353,6 +414,9 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
             "final_chips":      final_chips,
             "hands_won":        hands_won,
             "win_rate_pct":     round(win_rate, 1),
+            "n_bet_raise_postflop":   n_bet_raise_postflop,
+            "n_bet_raise_weak_hand":  n_bet_raise_weak_hand,
+            "strength_bluff_pct":      round(strength_bluff_pct, 1) if pd.notna(strength_bluff_pct) else float("nan"),
         })
 
     df = pd.DataFrame(records)
@@ -554,8 +618,8 @@ def plot_performance_ranking(metrics: pd.DataFrame, out: Path):
     if not MATPLOTLIB_AVAILABLE:
         return
 
-    # Sort winner-first (descending final chips), then reverse for barh (bottom-to-top)
-    df = metrics.sort_values("final_chips", ascending=True)
+    # Sort winner-first (descending final chips); invert_yaxis puts y=0 at top
+    df = metrics.sort_values("final_chips", ascending=False)
     names  = df["display_name"].tolist()
     y      = np.arange(len(df))
     height = 0.38
@@ -565,19 +629,19 @@ def plot_performance_ranking(metrics: pd.DataFrame, out: Path):
     # Final chips bar (primary)
     bars_final = ax.barh(y + height / 2, df["final_chips"], height=height,
                          color="#2196F3", label="Final chips", edgecolor="white")
-    # Chips won bar (secondary, lighter)
+    # Chips won bar (secondary)
     bars_won = ax.barh(y - height / 2, df["chips_won"], height=height,
                        color="#FF7043", label="Chips won from pots", edgecolor="white", alpha=0.85)
 
     # Labels on final chips bars
     for bar, val in zip(bars_final, df["final_chips"]):
         ax.text(bar.get_width() + 15, bar.get_y() + bar.get_height() / 2,
-                f"{int(val):,}", va="center", fontsize=8.5, fontweight="bold", color="#ddd")
+                f"{int(val):,}", va="center", fontsize=8.5, fontweight="bold", color="#222")
 
     # Labels on chips-won bars
     for bar, val in zip(bars_won, df["chips_won"]):
         ax.text(bar.get_width() + 15, bar.get_y() + bar.get_height() / 2,
-                f"{int(val):,}", va="center", fontsize=8, color="#aaa")
+                f"{int(val):,}", va="center", fontsize=8, color="#444")
 
     ax.set_yticks(y)
     ax.set_yticklabels(names, fontsize=9)
@@ -592,6 +656,37 @@ def plot_performance_ranking(metrics: pd.DataFrame, out: Path):
     plt.savefig(out / "performance_ranking.png", dpi=150)
     plt.close()
     print("  ✓ performance_ranking.png")
+
+
+def plot_bluff_proxy_ranking(metrics: pd.DataFrame, out: Path):
+    """
+    Horizontal bar chart: strength-based bluff proxy % per player, ranked descending
+    (most bet/raise with high card first).
+    """
+    if not MATPLOTLIB_AVAILABLE:
+        return
+    df = metrics.copy()
+    df["_pct"] = pd.to_numeric(df["strength_bluff_pct"], errors="coerce")
+    df = df.dropna(subset=["_pct"]).sort_values("_pct", ascending=True)
+    if df.empty:
+        return
+    names = df["display_name"].tolist()
+    vals = df["_pct"].tolist()
+    y = np.arange(len(df))
+    fig, ax = plt.subplots(figsize=(10, max(3, len(df) * 0.5)))
+    bars = ax.barh(y, vals, height=0.6, color="#7B1FA2", edgecolor="white")
+    ax.set_yticks(y)
+    ax.set_yticklabels(names, fontsize=9)
+    ax.set_xlabel("Strength-based bluff proxy %\n(postflop bet/raise with high card only)", fontsize=10)
+    ax.set_title("Bluff proxy ranking — who bet/raised most often with no pair?", fontsize=12, fontweight="bold")
+    ax.set_xlim(0, min(105, max(vals) * 1.15) if vals else 100)
+    for bar, v in zip(bars, vals):
+        ax.text(bar.get_width() + 1, bar.get_y() + bar.get_height() / 2,
+                f"{v:.1f}%", va="center", fontsize=8.5)
+    plt.tight_layout()
+    plt.savefig(out / "bluff_proxy_ranking.png", dpi=150)
+    plt.close()
+    print("  ✓ bluff_proxy_ranking.png")
 
 
 def plot_chen_vs_action(actions: pd.DataFrame, metrics: pd.DataFrame, out: Path):
@@ -924,6 +1019,30 @@ def generate_report(
         "",
         "---",
         "",
+        "## Strength-based bluff proxy",
+        "",
+        "Of each player's postflop **bet/raise** actions, what share were made with **high card only** "
+        "(no pair or better)? Higher values suggest more bluffing or semi-bluffing with air.",
+        "",
+        "| Rank | Player | Postflop bet/raise | With high card | Bluff proxy % |",
+        "|------|--------|--------------------|-----------------|---------------|",
+    ]
+    # Rank by strength_bluff_pct descending (most "bluffing" first); NaN last
+    bluff_rank = metrics.copy()
+    bluff_rank["_sort"] = bluff_rank["strength_bluff_pct"].fillna(-1)
+    for i, (pid, row) in enumerate(bluff_rank.sort_values("_sort", ascending=False).iterrows(), 1):
+        n_post = int(row.get("n_bet_raise_postflop", 0))
+        n_weak = int(row.get("n_bet_raise_weak_hand", 0))
+        pct = row.get("strength_bluff_pct")
+        pct_str = f"{pct:.1f}%" if pd.notna(pct) else "—"
+        lines.append(f"| {i} | {row['display_name']} | {n_post} | {n_weak} | {pct_str} |")
+    lines += [
+        "",
+        "**Definition:** *Bluff proxy %* = (postflop bet/raise with high card only) ÷ (all postflop bet/raise). "
+        "Requires hand evaluator; shown as — if no postflop bet/raise or evaluation unavailable.",
+        "",
+        "---",
+        "",
         "## Personality Profiles",
         "",
         "Players are classified into four canonical poker archetypes using VPIP% and "
@@ -999,6 +1118,7 @@ def generate_report(
         "| `action_distribution.png` | Stacked bar: fold / check / call / raise breakdown |",
         "| `aggression_profile.png` | VPIP vs AF scatter with personality quadrants |",
         "| `performance_ranking.png` | Chips-won ranking bar chart |",
+        "| `bluff_proxy_ranking.png` | Strength-based bluff proxy % (postflop bet/raise with high card) |",
         "| `chen_vs_action.png` | Preflop hand strength (Chen score) by action type |",
         "| `personality_radar.png` | Multi-dimensional radar chart per player |",
         "| `thinking_keywords.png` | Thinking-log keyword density by behavioral category |",
@@ -1087,6 +1207,8 @@ def main():
         actions, hands = load_all_data()
 
     out_dir.mkdir(exist_ok=True)
+    fig_dir = out_dir / "figures"
+    fig_dir.mkdir(exist_ok=True)
 
     print("► Computing player metrics...")
     metrics = compute_player_metrics(actions, hands)
@@ -1099,14 +1221,15 @@ def main():
 
     print()
     if MATPLOTLIB_AVAILABLE:
-        print("► Generating charts...")
-        plot_action_distribution(actions, metrics, out_dir)
-        plot_aggression_scatter(metrics, out_dir)
-        plot_performance_ranking(metrics, out_dir)
-        plot_chen_vs_action(actions, metrics, out_dir)
-        plot_radar_chart(metrics, out_dir)
-        plot_thinking_keywords(kw_analysis, metrics, out_dir)
-        plot_error_breakdown(metrics, out_dir)
+        print(f"► Generating charts → {fig_dir}")
+        plot_action_distribution(actions, metrics, fig_dir)
+        plot_aggression_scatter(metrics, fig_dir)
+        plot_performance_ranking(metrics, fig_dir)
+        plot_bluff_proxy_ranking(metrics, fig_dir)
+        plot_chen_vs_action(actions, metrics, fig_dir)
+        plot_radar_chart(metrics, fig_dir)
+        plot_thinking_keywords(kw_analysis, metrics, fig_dir)
+        plot_error_breakdown(metrics, fig_dir)
     else:
         print("► Skipping charts (matplotlib not installed)")
 
@@ -1137,6 +1260,19 @@ def main():
             f"  {i:<5} {row['display_name']:<22} {int(row['final_chips']):>12,} "
             f"{row['chips_won']:>10,.0f} {wl:>6}  [{row['personality']}]"
         )
+    print()
+
+    print("BLUFF PROXY RANKING (postflop bet/raise with high card only)")
+    print(f"  {'Rank':<5} {'Player':<22} {'Bet/Raise':>10} {'High card':>10} {'Bluff %':>8}")
+    print(f"  {'-'*5} {'-'*22} {'-'*10} {'-'*10} {'-'*8}")
+    bluff_ranked = metrics.copy()
+    bluff_ranked["_sort"] = bluff_ranked["strength_bluff_pct"].fillna(-1)
+    for i, (pid, row) in enumerate(bluff_ranked.sort_values("_sort", ascending=False).iterrows(), 1):
+        n_post = int(row.get("n_bet_raise_postflop", 0))
+        n_weak = int(row.get("n_bet_raise_weak_hand", 0))
+        pct = row.get("strength_bluff_pct")
+        pct_str = f"{pct:.1f}%" if pd.notna(pct) else "—"
+        print(f"  {i:<5} {row['display_name']:<22} {n_post:>10} {n_weak:>10} {pct_str:>8}")
     print()
 
 

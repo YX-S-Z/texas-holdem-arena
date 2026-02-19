@@ -118,6 +118,17 @@ function seatPosition(playerIndex, totalPlayers) {
   var boost = 1 + 0.22 * diagonalness;
   var left = 50 - rx * boost * Math.sin(angle);
   var top  = 50 + ry * boost * Math.cos(angle);
+
+  // For 10-player games, nudge the two left-side and two right-side seats
+  // (players 2/3 and 7/8) apart vertically.  They share the same horizontal
+  // column (sin(72°)=sin(108°)), so extra vertical spread is the only way
+  // to prevent overlap without shrinking the cards.
+  // Nudge direction: below-centre seats move down (+), above-centre move up (−).
+  if (totalPlayers === 10) {
+    var nudges10 = [0, 0, 4, -4, 0, 0, 0, -4, 4, 0];
+    top += nudges10[playerIndex] || 0;
+  }
+
   return { top: top + "%", left: left + "%" };
 }
 
@@ -133,11 +144,6 @@ function renderPlayers(state) {
   var container = el("players");
   var currentId = state.current_player_id;
   var n = state.players.length;
-
-  // Toggle compact layout for 9–10 player games
-  if (n >= 9) container.classList.add("many-players");
-  else container.classList.remove("many-players");
-
   var dealerIdx = state.dealer_index != null ? state.dealer_index : -1;
   var sbIdx = state.small_blind_index != null ? state.small_blind_index : -1;
   var bbIdx = state.big_blind_index != null ? state.big_blind_index : -1;

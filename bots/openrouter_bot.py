@@ -80,7 +80,7 @@ REQUEST_TIMEOUT = (10, 45)
 GUARDRAIL_MODEL = "anthropic/claude-sonnet-4-6"
 
 # On parse error, retry the main model this many times before guardrail/fallback.
-PARSE_ERROR_MAX_RETRIES = 5
+PARSE_ERROR_MAX_RETRIES = 3
 
 # ---------------------------------------------------------------------------
 # System prompt — establishes the bot's role for the entire session
@@ -333,7 +333,7 @@ class OpenRouterBot:
                 {"role": "user",   "content": user_message},
             ],
             "temperature": 0.7,
-            "max_tokens": 200,
+            "max_tokens": 500,
         }
         resp = requests.post(
             OPENROUTER_URL, headers=headers, json=body, timeout=REQUEST_TIMEOUT
@@ -518,7 +518,7 @@ class OpenRouterBot:
             "model": GUARDRAIL_MODEL,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0,
-            "max_tokens": 50,
+            "max_tokens": 500,
         }
         try:
             resp = requests.post(

@@ -105,11 +105,13 @@ function seatPosition(playerIndex, totalPlayers) {
   // Formula:
   //   left = 50 - rx * sin(angle)
   //   top  = 50 + ry * cos(angle)
-  // For 9–10 players reduce rx to avoid left-edge clipping and increase ry
-  // to maintain vertical clearance between the two left-side and right-side pairs
-  // that share the same horizontal position at 36° spacing.
+  // For 9–10 players:
+  //   rx: 44→40  – keeps left/right seats away from the horizontal edges
+  //   ry: 43→37  – prevents top/bottom seats from clipping off the table;
+  //                the taller table (620px) + compact player cards compensate
+  //                for the reduced vertical spread on the side pairs (P2/P3, P7/P8).
   var rx = totalPlayers >= 9 ? 40 : 44; // horizontal radius in %
-  var ry = totalPlayers >= 9 ? 44 : 43; // vertical radius in %
+  var ry = totalPlayers >= 9 ? 37 : 43; // vertical radius in %
   // Push diagonal seats (corners) further out so they don't overlap neighbors.
   // diagonalness is 1.0 at 45/135/225/315° and 0.0 at 0/90/180/270°.
   var diagonalness = Math.abs(Math.sin(2 * angle));
@@ -131,6 +133,11 @@ function renderPlayers(state) {
   var container = el("players");
   var currentId = state.current_player_id;
   var n = state.players.length;
+
+  // Toggle compact layout for 9–10 player games
+  if (n >= 9) container.classList.add("many-players");
+  else container.classList.remove("many-players");
+
   var dealerIdx = state.dealer_index != null ? state.dealer_index : -1;
   var sbIdx = state.small_blind_index != null ? state.small_blind_index : -1;
   var bbIdx = state.big_blind_index != null ? state.big_blind_index : -1;

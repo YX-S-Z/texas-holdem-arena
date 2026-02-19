@@ -103,6 +103,11 @@ def init_game_log(game_id: str) -> None:
             _init(game_id)
 
 
+def get_game_dir(game_id: str) -> Optional[str]:
+    """Return the data folder path for game_id, or None if not yet initialised."""
+    return _game_dirs.get(game_id)
+
+
 def log_action(
     *,
     game_id: str,

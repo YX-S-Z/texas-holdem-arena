@@ -111,6 +111,49 @@ API_KEY="your-openrouter-api-key-here" \
 | `--starting-stack` | 1000 | Starting chips per player |
 | `--port` | 8000 | Local port for the web UI |
 | `--key` | env `API_KEY` | API key (alternative to env var) |
+| `--screenshots` | off | Spectator mode only: capture a PNG after every action (see below) |
+
+---
+
+## Screenshot capture (spectator mode)
+
+Add `--screenshots` to capture the browser UI after every action — useful for assembling a demo video.
+
+### One-time setup
+
+```bash
+pip install playwright
+playwright install chromium
+```
+
+### Usage
+
+```bash
+API_KEY="your-openrouter-api-key-here" \
+  python arena.py --players claude gpt gemini deepseek \
+  --hands 10 \
+  --screenshots
+```
+
+### Output
+
+Screenshots are saved to **`data/<run-folder>/game_states_figs/`** alongside the CSV logs:
+
+```
+game_states_figs/
+  0001_initial.png                        # empty table before first action
+  0002_h01-preflop-gemini-3-flash.png     # Gemini just acted in hand 1, preflop
+  0003_h01-preflop-deepseek-v3-2.png
+  ...
+  0041_h01-showdown.png                   # winner announced
+  0042_h02-preflop-claude-sonnet-4-6.png  # hand 2 begins
+  ...
+  NNNN_leaderboard.png                    # final leaderboard overlay
+```
+
+Each file is prefixed with a zero-padded counter so frames sort naturally for `ffmpeg` or any slideshow tool.
+
+> **Note:** `--screenshots` only works in spectator mode (all-AI games). The headless Chromium browser runs in parallel with the visible browser, so you see the game live while screenshots are captured silently.
 
 ---
 
@@ -165,12 +208,9 @@ Output is written **into the same game folder**:
 |---|---|
 | `report.md` | Full personality + performance report per model |
 | `metrics.csv` | Raw strategy metrics (VPIP, PFR, AF, …) |
-| `action_distribution.png` | Fold / check / call / raise breakdown |
-| `aggression_profile.png` | VPIP vs Aggression Factor — personality quadrant chart |
-| `performance_ranking.png` | Chips-won ranking |
-| `chen_vs_action.png` | Preflop hand strength by action type |
-| `personality_radar.png` | Multi-dimensional radar chart per player |
-| `thinking_keywords.png` | Thinking-log keyword density |
+| `analysis_figs/aggression_profile.png` | VPIP vs Aggression Factor — personality quadrant chart |
+| `analysis_figs/performance_ranking.png` | Final chips & chips won, winner-first |
+| `analysis_figs/error_breakdown.png` | LLM output error counts by type |
 
 ### Analyse all games at once
 

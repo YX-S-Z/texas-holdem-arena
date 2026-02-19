@@ -11,7 +11,7 @@ Usage:
 Output:
     report.md               — Full personality + performance report
     metrics.csv             — Raw computed metrics per player
-    figures/
+    analysis_figs/
         aggression_profile.png   — VPIP vs AF scatter (personality quadrants)
         performance_ranking.png  — Final chips & chips won ranking
         error_breakdown.png      — LLM output error counts by type
@@ -661,7 +661,7 @@ def generate_report(
         "",
         "## Figures",
         "",
-        "All charts are saved to `figures/`:",
+        "All charts are saved to `analysis_figs/`:",
         "",
         "| File | Description |",
         "|------|-------------|",
@@ -715,7 +715,7 @@ def main():
         actions, hands = load_all_data()
 
     out_dir.mkdir(exist_ok=True)
-    fig_dir = out_dir / "figures"
+    fig_dir = out_dir / "analysis_figs"
     fig_dir.mkdir(exist_ok=True)
 
     print("► Computing player metrics...")

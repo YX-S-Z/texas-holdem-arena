@@ -5,3 +5,7 @@ uvicorn[standard]>=0.22.0
 pandas>=2.0.0
 numpy>=1.24.0
 matplotlib>=3.7.0
+
+# Screenshots (optional — only needed for --screenshots flag in spectator mode)
+# After pip install, also run: playwright install chromium
+playwright>=1.40.0

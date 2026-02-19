@@ -15,13 +15,16 @@ Usage examples:
 
 import argparse
 import os
+import re
 import sys
 import time
 import threading
 import webbrowser
+from pathlib import Path
 
 import requests
 
+import data_logger
 from bots.openrouter_bot import MODEL_ALIASES, resolve_model, model_display_name
 
 SERVER_HOST = "127.0.0.1"
@@ -153,6 +156,19 @@ def _next_hand(base: str, game_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Screenshot helpers
+# ---------------------------------------------------------------------------
+
+def _player_label(state: dict, player_id: str) -> str:
+    """Return a filename-safe display name for the player who just acted."""
+    for p in state.get("players", []):
+        if p["id"] == player_id:
+            raw = p.get("display_name", player_id)
+            return re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")[:25]
+    return re.sub(r"[^a-z0-9]+", "-", player_id.lower()).strip("-")
+
+
+# ---------------------------------------------------------------------------
 # Spectator polling loop
 # ---------------------------------------------------------------------------
 
@@ -185,10 +201,16 @@ def _check_arena_restart(base: str, current_game_id: str) -> str:
         return current_game_id
 
 
-def _spectator_loop(base: str, initial_game_id: str, max_hands: int) -> None:
+def _spectator_loop(
+    base: str,
+    initial_game_id: str,
+    max_hands: int,
+    screenshotter=None,
+) -> None:
     """Drive all bot moves and hand transitions. Runs in the main thread."""
     game_id = initial_game_id
     hands_played = 0
+    ss = screenshotter  # shorthand
     print(f"\nSpectator mode — watching game {game_id}")
     if max_hands:
         print(f"Will stop after {max_hands} hands. Press Ctrl+C to stop early.\n")
@@ -198,6 +220,10 @@ def _spectator_loop(base: str, initial_game_id: str, max_hands: int) -> None:
     last_phase = None
     last_current = None
     arena_check_ticks = 0  # how many ticks since last /arena/status check
+
+    # Capture the initial empty table before any action.
+    if ss:
+        ss.capture("initial", extra_wait=4.0)
 
     try:
         while True:
@@ -247,22 +273,43 @@ def _spectator_loop(base: str, initial_game_id: str, max_hands: int) -> None:
                     reason = "natural game end" if natural_end else f"{hands_played} hand(s)"
                     print(f"\nGame over ({reason}). Signalling browser...")
                     _finish_arena(base)
+                    if ss:
+                        # Give the browser time to render the leaderboard overlay.
+                        ss.capture("leaderboard", extra_wait=4.0)
+                        ss.stop()
                     print("Leaderboard is live. Server staying up — press Ctrl+C to stop.")
                     while True:
                         time.sleep(60)
+
+                # Capture the hand result (winner announcement) before moving on.
+                if ss:
+                    ss.capture(f"h{hands_played:02d}-showdown", extra_wait=2.0)
+
                 time.sleep(1.0)
                 _next_hand(base, game_id)
                 last_phase = None
                 last_current = None
             elif current is not None:
+                # Snapshot the label info *before* the bot acts (state reflects pre-move).
+                hand_num  = hands_played + 1
+                phase_str = (phase or "").replace("_", "-")
+                p_label   = _player_label(state, current)
+
                 ok = _bot_move(base, game_id)
                 # On timeout/error the server may have applied a fallback action
                 # or not; either way, the next state fetch will catch up.
-                time.sleep(POLL_INTERVAL if ok else 1.0)
+
+                if ss and ok:
+                    # extra_wait lets the frontend's 2 s poll cycle fire and render.
+                    ss.capture(f"h{hand_num:02d}-{phase_str}-{p_label}", extra_wait=2.5)
+                else:
+                    time.sleep(POLL_INTERVAL if ok else 1.0)
             else:
                 time.sleep(POLL_INTERVAL)
 
     except KeyboardInterrupt:
+        if ss:
+            ss.stop()
         print("\nStopped by user.")
         sys.exit(0)
 
@@ -317,6 +364,16 @@ Examples (with API key):
         type=int,
         default=0,
         help="Spectator mode: stop after this many hands (0 = unlimited)",
+    )
+    parser.add_argument(
+        "--screenshots",
+        action="store_true",
+        default=False,
+        help=(
+            "Spectator mode only: capture a PNG screenshot after every action "
+            "and save them to game_states_figs/ inside the run's data folder. "
+            "Requires: pip install playwright && playwright install chromium"
+        ),
     )
     return parser
 
@@ -410,9 +467,23 @@ def main() -> None:
     print(f"Opening browser: {url}\n")
     webbrowser.open(url)
 
+    # --- Screenshotter setup (spectator + --screenshots only) ---
+    ss = None
+    if spectator and args.screenshots:
+        from screenshotter import Screenshotter
+        game_dir = data_logger.get_game_dir(game_id)
+        if game_dir:
+            ss_dir = Path(game_dir) / "game_states_figs"
+            ss = Screenshotter(ss_dir, url)
+            if not ss.start():
+                ss = None
+                print("[screenshots] Disabled — see error above.\n")
+        else:
+            print("[screenshots] Game folder not found yet; screenshots disabled.\n")
+
     # --- Run ---
     if spectator:
-        _spectator_loop(base, game_id, args.hands)  # game_id = initial game
+        _spectator_loop(base, game_id, args.hands, screenshotter=ss)
     else:
         # Human mode: keep server alive, browser drives everything
         print("Game running. Press Ctrl+C to stop.\n")

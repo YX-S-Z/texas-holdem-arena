@@ -14,7 +14,6 @@ Output:
     figures/
         aggression_profile.png   — VPIP vs AF scatter (personality quadrants)
         performance_ranking.png  — Final chips & chips won ranking
-        bluff_proxy_ranking.png  — Bluff intent % inferred from thinking text
         error_breakdown.png      — LLM output error counts by type
 """
 
@@ -109,25 +108,6 @@ def chen_score(card_str: str) -> float:
         if gap <= 1 and low < 12:
             score += 1
     return round(score, 1)
-
-
-# ── Bluff intent keywords ──────────────────────────────────────────────────────
-# These phrases in a bet/raise thinking log are unambiguous signals of bluff intent.
-# We read the LLM's own reasoning rather than inferring from hand strength,
-# because LLMs explicitly state when they are bluffing.
-BLUFF_INTENT_KEYWORDS = [
-    "bluff", "semi-bluff", "semibluff", "bluffing",
-    "represent", "representing",
-    "steal",
-    "with air", "with nothing", "no made hand",
-    "squeeze",
-]
-
-
-def _has_bluff_intent(thinking: str) -> bool:
-    """Return True if the thinking text contains an explicit bluff intent signal."""
-    t = thinking.lower()
-    return any(kw in t for kw in BLUFF_INTENT_KEYWORDS)
 
 
 # ── Data Loading ───────────────────────────────────────────────────────────────
@@ -233,7 +213,6 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
     fold_rate%   — Overall fold rate
     avg_raise    — Average postflop bet/raise size in chips
     error_rate%  — LLM output error rate (all types combined)
-    bluff_pct%   — % of bet/raise actions where thinking signals bluff intent
     final_chips  — Last recorded chip stack (proxy for end-of-game chips)
     chips_won    — Total chips won from pots (gross)
     """
@@ -290,22 +269,6 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
         ).dropna()
         avg_raise = raise_amts.mean() if len(raise_amts) > 0 else 0.0
 
-        # ── Bluff proxy (thinking-text intent) ───────────────────────────
-        # Among all bet/raise actions that have a thinking log, count how many
-        # explicitly signal bluff intent in the model's own reasoning.
-        # This is more reliable than hand-strength inference because LLMs state
-        # their intent directly.
-        agg_actions = pa[pa["action_type"].isin(AGGRESSIVE)]
-        agg_with_thinking = agg_actions[agg_actions["thinking"].notna() &
-                                        (agg_actions["thinking"].str.len() > 0)]
-        n_agg_thinking = len(agg_with_thinking)
-        if n_agg_thinking > 0:
-            bluff_count = agg_with_thinking["thinking"].apply(_has_bluff_intent).sum()
-            bluff_pct   = bluff_count / n_agg_thinking * 100
-        else:
-            bluff_count = 0
-            bluff_pct   = float("nan")
-
         # ── LLM output error breakdown ────────────────────────────────────
         err = pa["failure_reason"].fillna("")
         n_parse_error         = (err == "parse_error").sum()
@@ -349,9 +312,6 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
             "fold_rate":              round(fold_rate, 1),
             "pre_fold_rate":          round(pre_fold_rate, 1),
             "avg_raise_size":         round(avg_raise, 1),
-            "bluff_pct":              round(bluff_pct, 1) if pd.notna(bluff_pct) else float("nan"),
-            "bluff_count":            int(bluff_count),
-            "agg_with_thinking":      int(n_agg_thinking),
             "error_rate":             round(error_rate, 1),
             "n_parse_error":          int(n_parse_error),
             "n_parse_error_rescued":  int(n_parse_error_rescued),
@@ -487,62 +447,6 @@ def plot_performance_ranking(metrics: pd.DataFrame, out: Path):
     plt.savefig(out / "performance_ranking.png", dpi=150)
     plt.close()
     print("  ✓ performance_ranking.png")
-
-
-def plot_bluff_proxy_ranking(metrics: pd.DataFrame, out: Path):
-    """
-    Horizontal bar chart: bluff intent % per player (thinking-keyword approach),
-    sorted highest first. Only includes players with at least one bet/raise with
-    a thinking log.
-
-    Methodology: among a player's bet/raise actions that include a thinking log,
-    what % contain explicit bluff-intent language ("bluff", "represent", "steal",
-    "with air", etc.)? LLMs state their intent directly in reasoning, making this
-    a more reliable signal than inferring from hand strength alone.
-    """
-    if not MATPLOTLIB_AVAILABLE:
-        return
-
-    df = metrics.copy()
-    df["_pct"] = pd.to_numeric(df["bluff_pct"], errors="coerce")
-    df = df.dropna(subset=["_pct"]).sort_values("_pct", ascending=False)
-
-    if df.empty:
-        print("  ⚠ Skipping bluff_proxy_ranking (no data)")
-        return
-
-    # Reverse for barh + invert_yaxis → highest at top
-    df_plot = df.iloc[::-1]
-    y    = np.arange(len(df_plot))
-    vals = df_plot["_pct"].tolist()
-
-    fig, ax = plt.subplots(figsize=(11, max(3, len(df_plot) * 0.65)))
-    bars = ax.barh(y, vals, height=0.55, color="#7B1FA2", edgecolor="white", alpha=0.88)
-    ax.set_yticks(y)
-    ax.set_yticklabels(df_plot["display_name"].tolist(), fontsize=9)
-
-    for bar, row_val in zip(bars, df_plot.itertuples()):
-        n_bluff = int(row_val.bluff_count)
-        n_total = int(row_val.agg_with_thinking)
-        ax.text(bar.get_width() + 0.5,
-                bar.get_y() + bar.get_height() / 2,
-                f"{bar.get_width():.1f}%  ({n_bluff}/{n_total})",
-                va="center", fontsize=8.5, color="#444")
-
-    ax.set_xlabel(
-        "Bluff intent %  (bet/raise actions with explicit bluff signal in thinking)",
-        fontsize=10)
-    ax.set_title(
-        "Bluff Proxy Ranking — Thinking-Text Intent\n"
-        "(keywords: bluff, represent, steal, with air, squeeze, …)",
-        fontsize=12, fontweight="bold")
-    xmax = max(vals) * 1.25 if vals else 100
-    ax.set_xlim(0, min(105, max(xmax, 10)))
-    ax.invert_yaxis()
-    plt.tight_layout()
-    plt.savefig(out / "bluff_proxy_ranking.png", dpi=150)
-    plt.close()
-    print("  ✓ bluff_proxy_ranking.png")
 
 
 def plot_error_breakdown(metrics: pd.DataFrame, out: Path):
@@ -706,32 +610,6 @@ def generate_report(
         "",
         "---",
         "",
-        "## Bluff Proxy",
-        "",
-        "Among each player's bet/raise actions that include a thinking log, "
-        "what percentage contain explicit bluff-intent language? "
-        "LLMs state their intent directly in their reasoning, making this a reliable "
-        "proxy for bluffing behavior without requiring hand-strength evaluation.",
-        "",
-        f"**Keywords searched:** {', '.join(f'`{k}`' for k in BLUFF_INTENT_KEYWORDS)}",
-        "",
-        "| Rank | Player | Bet/Raise (w/ thinking) | Bluff signals | Bluff % |",
-        "|------|--------|------------------------|---------------|---------|",
-    ]
-
-    bluff_ranked = metrics.copy()
-    bluff_ranked["_sort"] = bluff_ranked["bluff_pct"].fillna(-1)
-    for i, (pid, row) in enumerate(bluff_ranked.sort_values("_sort", ascending=False).iterrows(), 1):
-        pct_str = f"{row['bluff_pct']:.1f}%" if pd.notna(row["bluff_pct"]) else "—"
-        lines.append(
-            f"| {i} | {row['display_name']} | {int(row['agg_with_thinking'])} | "
-            f"{int(row['bluff_count'])} | {pct_str} |"
-        )
-
-    lines += [
-        "",
-        "---",
-        "",
         "## Personality Profiles",
         "",
         "Classified into four canonical poker archetypes using VPIP% and Aggression Factor:",
@@ -747,7 +625,6 @@ def generate_report(
 
     for pid, row in metrics.iterrows():
         personality, description = classify_personality(row)
-        bluff_str = f"{row['bluff_pct']:.1f}%" if pd.notna(row["bluff_pct"]) else "N/A"
         lines += [
             f"### {row['display_name']}  `[{personality}]`",
             "",
@@ -761,8 +638,6 @@ def generate_report(
             f"Preflop fold rate: **{row['pre_fold_rate']}%**",
             f"- Avg postflop raise: **{row['avg_raise_size']} chips** | "
             f"Avg reasoning length: **{row['avg_thinking_len']:.0f} chars**",
-            f"- Bluff intent in bet/raise thinking: **{bluff_str}** "
-            f"({int(row['bluff_count'])} of {int(row['agg_with_thinking'])} raise/bet actions)",
             f"- LLM error rate: **{row['error_rate']}%** "
             f"({int(row['n_parse_error'])} parse, "
             f"{int(row['n_parse_error_rescued'])} rescued, "
@@ -782,7 +657,6 @@ def generate_report(
         "|------|-------------|",
         "| `aggression_profile.png` | VPIP vs AF scatter with personality quadrants |",
         "| `performance_ranking.png` | Final chips & chips won, sorted winner-first |",
-        "| `bluff_proxy_ranking.png` | Bluff intent % inferred from thinking-text keywords |",
         "| `error_breakdown.png` | LLM output error counts by type per player |",
         "",
         "---",
@@ -843,7 +717,6 @@ def main():
         print(f"► Generating charts → {fig_dir}")
         plot_aggression_scatter(metrics, fig_dir)
         plot_performance_ranking(metrics, fig_dir)
-        plot_bluff_proxy_ranking(metrics, fig_dir)
         plot_error_breakdown(metrics, fig_dir)
     else:
         print("► Skipping charts (matplotlib not installed)")
@@ -873,18 +746,6 @@ def main():
         print(f"  {i:<5} {row['display_name']:<22} {int(row['final_chips']):>12,} "
               f"{row['chips_won']:>10,.0f} {wl:>6}  [{row['personality']}]")
     print()
-
-    print("BLUFF PROXY (thinking-text intent)")
-    print(f"  {'Rank':<5} {'Player':<22} {'Raise+Think':>11} {'Bluff sig':>9} {'Bluff%':>7}")
-    print(f"  {'-'*5} {'-'*22} {'-'*11} {'-'*9} {'-'*7}")
-    bluff_ranked = metrics.copy()
-    bluff_ranked["_sort"] = bluff_ranked["bluff_pct"].fillna(-1)
-    for i, (pid, row) in enumerate(bluff_ranked.sort_values("_sort", ascending=False).iterrows(), 1):
-        pct_str = f"{row['bluff_pct']:.1f}%" if pd.notna(row["bluff_pct"]) else "—"
-        print(f"  {i:<5} {row['display_name']:<22} {int(row['agg_with_thinking']):>11} "
-              f"{int(row['bluff_count']):>9} {pct_str:>7}")
-    print()
-
 
 if __name__ == "__main__":
     main()

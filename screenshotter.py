@@ -13,6 +13,7 @@ Installation (one-time):
 from __future__ import annotations
 
 import re
+import subprocess
 import time
 from pathlib import Path
 from typing import Optional
@@ -89,8 +90,59 @@ class Screenshotter:
             return False
 
     def stop(self) -> None:
-        """Close the browser."""
+        """Close the browser, then render the captured frames into an MP4."""
         self._cleanup()
+        self.render_video()
+
+    def render_video(self, fps: float = 1.0) -> Optional[Path]:
+        """
+        Combine all PNG frames in *out_dir* into an MP4 using ffmpeg.
+
+        The video is written to the *parent* of out_dir (i.e. the game's
+        data folder) as ``game.mp4``.  Each frame is shown for ``1/fps``
+        seconds; the default of 1 fps gives viewers a full second per action.
+
+        Requires ffmpeg to be installed (``brew install ffmpeg`` on macOS).
+        Returns the path to the MP4, or None if ffmpeg is missing or there
+        are no frames to encode.
+        """
+        frames = sorted(self.out_dir.glob("*.png"))
+        if not frames:
+            print("[video] No frames to encode.")
+            return None
+
+        # Write an ffmpeg concat-demuxer list so filenames with spaces/globs work.
+        list_path = self.out_dir / "_frames.txt"
+        with list_path.open("w") as fh:
+            for frame in frames:
+                duration = 1.0 / fps
+                fh.write(f"file '{frame.resolve()}'\n")
+                fh.write(f"duration {duration}\n")
+            # ffmpeg needs the last entry repeated without a duration to flush it.
+            fh.write(f"file '{frames[-1].resolve()}'\n")
+
+        out_mp4 = self.out_dir.parent / "game.mp4"
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(list_path),
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # H.264 requires even dims
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            str(out_mp4),
+        ]
+
+        print(f"[video] Encoding {len(frames)} frames → {out_mp4.name} ...")
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            list_path.unlink(missing_ok=True)   # clean up temp file
+            print(f"[video] Saved: {out_mp4}")
+            return out_mp4
+        except FileNotFoundError:
+            print("[video] ffmpeg not found. Install with:  brew install ffmpeg")
+            return None
+        except subprocess.CalledProcessError as exc:
+            print(f"[video] ffmpeg failed:\n{exc.stderr.decode()}")
+            return None
 
     def _cleanup(self) -> None:
         try:

@@ -206,6 +206,7 @@ def _spectator_loop(
     initial_game_id: str,
     max_hands: int,
     screenshotter=None,
+    auto_exit: bool = False,
 ) -> None:
     """Drive all bot moves and hand transitions. Runs in the main thread."""
     game_id = initial_game_id
@@ -277,6 +278,9 @@ def _spectator_loop(
                         # Give the browser time to render the leaderboard overlay.
                         ss.capture("leaderboard", extra_wait=4.0)
                         ss.stop()
+                    if auto_exit:
+                        print("Batch mode — exiting cleanly.")
+                        sys.exit(0)
                     print("Leaderboard is live. Server staying up — press Ctrl+C to stop.")
                     while True:
                         time.sleep(60)
@@ -413,6 +417,20 @@ Examples (with API key):
             "Requires: pip install playwright && playwright install chromium"
         ),
     )
+    parser.add_argument(
+        "--auto-exit",
+        action="store_true",
+        default=False,
+        dest="auto_exit",
+        help="Exit automatically when all hands are done (useful for batch runs).",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        default=False,
+        dest="no_browser",
+        help="Do not open a browser window (useful for headless batch runs).",
+    )
     return parser
 
 
@@ -502,8 +520,11 @@ def main() -> None:
         url += "&spectator=1"
     if args.hands > 0:
         url += f"&hands={args.hands}"
-    print(f"Opening browser: {url}\n")
-    webbrowser.open(url)
+    if args.no_browser:
+        print(f"Game URL (browser suppressed): {url}\n")
+    else:
+        print(f"Opening browser: {url}\n")
+        webbrowser.open(url)
 
     # --- Screenshotter setup (--screenshots works in both spectator and human mode) ---
     ss = None
@@ -521,7 +542,7 @@ def main() -> None:
 
     # --- Run ---
     if spectator:
-        _spectator_loop(base, game_id, args.hands, screenshotter=ss)
+        _spectator_loop(base, game_id, args.hands, screenshotter=ss, auto_exit=args.auto_exit)
     else:
         # Human mode: keep server alive, browser drives everything.
         # Screenshots run in a background daemon thread if requested.

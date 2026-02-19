@@ -80,7 +80,7 @@ REQUEST_TIMEOUT = (10, 45)
 GUARDRAIL_MODEL = "anthropic/claude-sonnet-4-6"
 
 # On parse error, retry the main model this many times before guardrail/fallback.
-PARSE_ERROR_MAX_RETRIES = 3
+PARSE_ERROR_MAX_RETRIES = 5
 
 # ---------------------------------------------------------------------------
 # System prompt — establishes the bot's role for the entire session

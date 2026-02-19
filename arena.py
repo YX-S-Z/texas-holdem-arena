@@ -314,6 +314,43 @@ def _spectator_loop(
         sys.exit(0)
 
 
+def _human_screenshot_loop(base: str, game_id: str, ss) -> None:
+    """Background daemon thread: capture screenshots on state changes in human mode."""
+    hands_seen = 0
+    last_sig = None  # (phase, current_player_id) — detects every turn/phase change
+
+    # Wait for the browser to render the initial table, then capture it.
+    time.sleep(3.5)
+    ss.capture("initial", extra_wait=2.0)
+
+    try:
+        while True:
+            try:
+                state = _get_state(base, game_id)
+            except requests.RequestException:
+                time.sleep(1.0)
+                continue
+
+            phase = state.get("phase")
+            current = state.get("current_player_id")
+            sig = (phase, current)
+
+            if sig != last_sig:
+                last_sig = sig
+                if phase in ("hand_over", "showdown"):
+                    hands_seen += 1
+                    ss.capture(f"h{hands_seen:02d}-showdown", extra_wait=2.0)
+                elif current is not None:
+                    hand_num  = hands_seen + 1
+                    phase_str = (phase or "").replace("_", "-")
+                    p_label   = _player_label(state, current)
+                    ss.capture(f"h{hand_num:02d}-{phase_str}-{p_label}", extra_wait=2.0)
+
+            time.sleep(POLL_INTERVAL)
+    except Exception:
+        pass  # daemon thread — exit silently on any error
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing and main
 # ---------------------------------------------------------------------------
@@ -370,8 +407,9 @@ Examples (with API key):
         action="store_true",
         default=False,
         help=(
-            "Spectator mode only: capture a PNG screenshot after every action "
-            "and save them to game_states_figs/ inside the run's data folder. "
+            "Capture a PNG screenshot after every action and save them to "
+            "game_states_figs/ inside the run's data folder. Works in both "
+            "spectator and human mode. "
             "Requires: pip install playwright && playwright install chromium"
         ),
     )
@@ -467,9 +505,9 @@ def main() -> None:
     print(f"Opening browser: {url}\n")
     webbrowser.open(url)
 
-    # --- Screenshotter setup (spectator + --screenshots only) ---
+    # --- Screenshotter setup (--screenshots works in both spectator and human mode) ---
     ss = None
-    if spectator and args.screenshots:
+    if args.screenshots:
         from screenshotter import Screenshotter
         game_dir = data_logger.get_game_dir(game_id)
         if game_dir:
@@ -485,12 +523,22 @@ def main() -> None:
     if spectator:
         _spectator_loop(base, game_id, args.hands, screenshotter=ss)
     else:
-        # Human mode: keep server alive, browser drives everything
+        # Human mode: keep server alive, browser drives everything.
+        # Screenshots run in a background daemon thread if requested.
+        if ss:
+            t = threading.Thread(
+                target=_human_screenshot_loop,
+                args=(base, game_id, ss),
+                daemon=True,
+            )
+            t.start()
         print("Game running. Press Ctrl+C to stop.\n")
         try:
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
+            if ss:
+                ss.stop()
             print("\nStopped.")
 
 

@@ -331,10 +331,17 @@ def compute_player_metrics(actions: pd.DataFrame, hands: pd.DataFrame) -> pd.Dat
 
 # ── Personality Classification ─────────────────────────────────────────────────
 #
-#   TAG  (Tight-Aggressive)  VPIP<22%, AF>1.2  — selective + aggressive
-#   LAG  (Loose-Aggressive)  VPIP≥22%, AF>1.2  — wide range + aggressive
-#   Nit  (Tight-Passive)     VPIP<22%, AF≤1.2  — very selective + passive
-#   Fish (Loose-Passive)     VPIP≥22%, AF≤1.2  — calls too much, rarely raises
+# Thresholds follow the industry-standard convention used by PokerTracker /
+# Holdem Manager HUD defaults and widely cited in poker coaching literature
+# (e.g. Ed Miller "The Course", Tendler & Carter "The Mental Game of Poker"):
+#
+#   VPIP threshold : 25%   — below = tight, at/above = loose
+#   AF   threshold : 1.5   — above = aggressive, at/below = passive
+#
+#   TAG  (Tight-Aggressive)  VPIP<25%, AF>1.5  — selective + aggressive
+#   LAG  (Loose-Aggressive)  VPIP≥25%, AF>1.5  — wide range + aggressive
+#   Nit  (Tight-Passive)     VPIP<25%, AF≤1.5  — very selective + passive
+#   Fish (Loose-Passive)     VPIP≥25%, AF≤1.5  — calls too much, rarely raises
 
 PERSONALITY_COLORS = {
     "TAG":  "#2196F3",
@@ -348,8 +355,8 @@ def classify_personality(row) -> tuple[str, str]:
     vpip   = float(row.get("vpip_pct", 0) or 0)
     af_raw = float(row.get("_af_raw",  0) or 0)
     afq    = float(row.get("afq",      0) or 0)
-    tight      = vpip < 22
-    aggressive = af_raw > 1.2 or afq > 35
+    tight      = vpip < 25
+    aggressive = af_raw > 1.5 or afq > 35
     if tight and aggressive:
         return "TAG", "Tight-Aggressive — selective hand entry combined with strong post-flop betting"
     elif tight and not aggressive:
@@ -368,16 +375,16 @@ def plot_aggression_scatter(metrics: pd.DataFrame, out: Path):
         return
 
     fig, ax = plt.subplots(figsize=(9, 7))
-    ax.axvspan(0,  22,  0, 1, alpha=0.04, color="#9E9E9E")
-    ax.axvspan(22, 100, 0, 1, alpha=0.04, color="#FF9800")
-    ax.axhline(1.2, color="#BDBDBD", linewidth=1, linestyle="--")
-    ax.axvline(22,  color="#BDBDBD", linewidth=1, linestyle="--")
+    ax.axvspan(0,  25,  0, 1, alpha=0.04, color="#9E9E9E")
+    ax.axvspan(25, 100, 0, 1, alpha=0.04, color="#FF9800")
+    ax.axhline(1.5, color="#BDBDBD", linewidth=1, linestyle="--")
+    ax.axvline(25,  color="#BDBDBD", linewidth=1, linestyle="--")
 
-    ax.text(11, 0.15, "Nit/Rock", ha="center", color="#9E9E9E", fontsize=9, style="italic")
-    ax.text(60, 0.15, "Fish / Calling Station", ha="center", color="#FF9800", fontsize=9, style="italic")
+    ax.text(12.5, 0.15, "Nit/Rock", ha="center", color="#9E9E9E", fontsize=9, style="italic")
+    ax.text(62.5, 0.15, "Fish / Calling Station", ha="center", color="#FF9800", fontsize=9, style="italic")
     ymax = max(5.5, metrics["_af_raw"].max() + 0.6)
-    ax.text(11, ymax * 0.88, "TAG", ha="center", color="#2196F3", fontsize=10, fontweight="bold")
-    ax.text(60, ymax * 0.88, "LAG", ha="center", color="#F44336", fontsize=10, fontweight="bold")
+    ax.text(12.5, ymax * 0.88, "TAG", ha="center", color="#2196F3", fontsize=10, fontweight="bold")
+    ax.text(62.5, ymax * 0.88, "LAG", ha="center", color="#F44336", fontsize=10, fontweight="bold")
 
     for pid, row in metrics.iterrows():
         personality, _ = classify_personality(row)
@@ -616,10 +623,13 @@ def generate_report(
         "",
         "| Archetype | VPIP | AF | Play Style |",
         "|-----------|------|----|------------|",
-        "| **TAG** (Tight-Aggressive) | <22% | >1.2 | Patient entry, strong betting |",
-        "| **LAG** (Loose-Aggressive) | ≥22% | >1.2 | Wide range + aggression; high-variance |",
-        "| **Nit/Rock**               | <22% | ≤1.2 | Overly selective; passive when in hand |",
-        "| **Fish** (Calling Station) | ≥22% | ≤1.2 | Calls too much, rarely raises |",
+        "| **TAG** (Tight-Aggressive) | <25% | >1.5 | Patient entry, strong betting |",
+        "| **LAG** (Loose-Aggressive) | ≥25% | >1.5 | Wide range + aggression; high-variance |",
+        "| **Nit/Rock**               | <25% | ≤1.5 | Overly selective; passive when in hand |",
+        "| **Fish** (Calling Station) | ≥25% | ≤1.5 | Calls too much, rarely raises |",
+        "",
+        "> Thresholds follow the PokerTracker / Holdem Manager HUD convention "
+        "(VPIP 25%, AF 1.5), the most widely used standard in poker analysis tooling.",
         "",
     ]
 

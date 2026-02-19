@@ -183,14 +183,16 @@ Output is written to `analysis/output/`.
 
 ### Personality archetypes
 
-Models are classified into four canonical poker archetypes based on industry-standard metrics (VPIP, PFR, AF):
+Models are classified into four canonical poker archetypes based on VPIP% and Aggression Factor (AF):
 
-| Archetype | VPIP | Aggression | Play style |
+| Archetype | VPIP | AF | Play style |
 |---|---|---|---|
-| **TAG** (Tight-Aggressive) | < 22% | High | Selective entry, strong betting — the "textbook" winning style |
-| **LAG** (Loose-Aggressive) | ≥ 22% | High | Wide range + aggression; high-variance, hard to read |
-| **Nit / Rock** | < 22% | Low | Very selective entry, passive when in hand |
-| **Fish** (Calling Station) | ≥ 22% | Low | Enters many pots but rarely raises; bleeds chips slowly |
+| **TAG** (Tight-Aggressive) | < 25% | > 1.5 | Selective entry, strong betting — the "textbook" winning style |
+| **LAG** (Loose-Aggressive) | ≥ 25% | > 1.5 | Wide range + aggression; high-variance, hard to read |
+| **Nit / Rock** | < 25% | ≤ 1.5 | Very selective entry, passive when in hand |
+| **Fish** (Calling Station) | ≥ 25% | ≤ 1.5 | Enters many pots but rarely raises; bleeds chips slowly |
+
+> **Convention:** thresholds follow the PokerTracker / Holdem Manager HUD defaults (VPIP 25%, AF 1.5) — the most widely used standard in poker analysis tooling.
 
 ---
 

@@ -105,13 +105,11 @@ function seatPosition(playerIndex, totalPlayers) {
   // Formula:
   //   left = 50 - rx * sin(angle)
   //   top  = 50 + ry * cos(angle)
-  // For 9–10 players:
-  //   rx: 44→40  – keeps left/right seats away from the horizontal edges
-  //   ry: 43→37  – prevents top/bottom seats from clipping off the table;
-  //                the taller table (620px) + compact player cards compensate
-  //                for the reduced vertical spread on the side pairs (P2/P3, P7/P8).
-  var rx = totalPlayers >= 9 ? 42 : 44; // horizontal radius in %
-  var ry = totalPlayers >= 9 ? 38 : 43; // vertical radius in %
+  // For 9–10 players use a larger ry so the top/bottom seats hug the table
+  // rail (they overflow slightly into the dark padding area, which looks natural)
+  // and rx=40 keeps the left/right sides from clipping excessively.
+  var rx = totalPlayers >= 9 ? 34 : 44; // horizontal radius in %
+  var ry = totalPlayers >= 9 ? 42: 43; // vertical radius in %
   // Push diagonal seats (corners) further out so they don't overlap neighbors.
   // diagonalness is 1.0 at 45/135/225/315° and 0.0 at 0/90/180/270°.
   var diagonalness = Math.abs(Math.sin(2 * angle));
@@ -125,8 +123,19 @@ function seatPosition(playerIndex, totalPlayers) {
   // to prevent overlap without shrinking the cards.
   // Nudge direction: below-centre seats move down (+), above-centre move up (−).
   if (totalPlayers === 10) {
-    var nudges10 = [0, 0, 5, -5, 0, 0, 0, -5, 5, 0];
-    top += nudges10[playerIndex] || 0;
+    var vNudges10 = [0, 0, 4, -4, 0, 0, 0, -4, 4, 0];
+    var hNudges10 = [0, 0, -9, -9, 0, 0, 0, 9, 9, 0];
+    top  += vNudges10[playerIndex] || 0;
+    left += hNudges10[playerIndex] || 0;
+  }
+  if (totalPlayers === 9) {
+    // P2(80°) and P3(120°) are the left-side pair; P6(240°) and P7(280°) the right-side pair.
+    // v-nudge: below-centre seats move down (+), above-centre move up (−).
+    // h-nudge: left pair moves left (−), right pair moves right (+).
+    var vNudges9 = [0, 3, 3, -3, 0, 0, -3, 3, 3];
+    var hNudges9 = [0, 3, -8, -8, 0, 0,  8, 8, -3];
+    top  += vNudges9[playerIndex] || 0;
+    left += hNudges9[playerIndex] || 0;
   }
 
   return { top: top + "%", left: left + "%" };

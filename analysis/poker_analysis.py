@@ -636,7 +636,7 @@ def plot_performance_ranking(metrics: pd.DataFrame, out: Path):
     # Labels on final chips bars
     for bar, val in zip(bars_final, df["final_chips"]):
         ax.text(bar.get_width() + 15, bar.get_y() + bar.get_height() / 2,
-                f"{int(val):,}", va="center", fontsize=8.5, fontweight="bold", color="#222")
+                f"{int(val):,}", va="center", fontsize=8.5, fontweight="bold", color="#444")
 
     # Labels on chips-won bars
     for bar, val in zip(bars_won, df["chips_won"]):
@@ -880,7 +880,7 @@ def plot_error_breakdown(metrics: pd.DataFrame, out: Path):
         for i, (v, l) in enumerate(zip(vals, left)):
             if v >= 1:
                 ax.text(l + v / 2, i, str(int(v)), ha="center", va="center",
-                        fontsize=8, color="white", fontweight="bold")
+                        fontsize=8, color="#444", fontweight="bold")
         left += vals
 
     # Annotate total error rate on the right

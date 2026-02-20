@@ -19,6 +19,7 @@ from .game_session import (
     clone_game,
     get_game,
     get_last_action,
+    set_last_action,
     get_hands_played,
     get_bust_order,
     get_failure_stats,
@@ -120,6 +121,25 @@ def api_apply_action(game_id: str, body: ActionBody):
         thinking=None,
         failure_reason=None,
     )
+    # Build last_action summary for human player (same format as bot actions)
+    atype = body.action.get("type", "?")
+    pre_stack = _p_pre.get("stack", 0)
+    if (atype == "raise" or atype == "call") and body.action.get("amount") == pre_stack and pre_stack > 0:
+        action_label = "ALL IN"
+    elif atype == "raise":
+        action_label = f"raise to {body.action.get('amount')}"
+    elif atype == "call":
+        action_label = f"call {body.action.get('amount')}"
+    else:
+        action_label = atype
+    set_last_action(game_id, {
+        "player_id": body.player_id,
+        "display_name": _p_pre.get("display_name", body.player_id),
+        "action_label": action_label,
+        "thinking": None,
+        "failure_reason": None,
+        "raw_response": None,
+    })
     state = game.get_state(viewer_id=body.player_id)
     state["last_action"] = get_last_action(game_id)
     state["hands_played"] = get_hands_played(game_id)

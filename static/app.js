@@ -10,6 +10,11 @@ let lastThinkingKey = null;
 let lastLogKey = null;
 let lastHandResultKey = null;
 
+// Per-player last action tracking (for floating action labels)
+var playerLastActions = {};  // player_id -> action_label
+var _lastActionTrackKey = null;
+var _lastHandNum = -1;
+
 // Read URL params: ?game_id=xxx&spectator=1&arena=1&hands=N
 var _params = new URLSearchParams(window.location.search);
 var SPECTATOR_MODE = _params.get("spectator") === "1";
@@ -28,6 +33,9 @@ function clearGame() {
   botMoveInProgress = false;
   lastThinkingKey = null;
   lastHandResultKey = null;
+  playerLastActions = {};
+  _lastActionTrackKey = null;
+  _lastHandNum = -1;
   el("game-id").textContent = "";
   el("players").innerHTML = "";
   el("community-cards").innerHTML = "";
@@ -133,7 +141,7 @@ function seatPosition(playerIndex, totalPlayers) {
     // v-nudge: below-centre seats move down (+), above-centre move up (−).
     // h-nudge: left pair moves left (−), right pair moves right (+).
     var vNudges9 = [0, 3, 3, -3, 0, 0, -3, 3, 3];
-    var hNudges9 = [0, 3, -8, -8, 0, 0,  8, 8, -3];
+    var hNudges9 = [0, 3, -10, -8, 0, 0,  8, 10, -3];
     top  += vNudges9[playerIndex] || 0;
     left += hNudges9[playerIndex] || 0;
   }
@@ -149,6 +157,27 @@ function cardsKey(p) {
   return "hidden";
 }
 
+// Determine the CSS class for a last-action label
+function _actionClass(label) {
+  if (!label) return "";
+  var lower = label.toLowerCase();
+  if (lower.indexOf("all") !== -1 || lower.indexOf("all-in") !== -1 || lower.indexOf("allin") !== -1) return "action-allin";
+  if (lower.indexOf("fold") !== -1) return "action-fold";
+  if (lower.indexOf("check") !== -1) return "action-check";
+  if (lower.indexOf("call") !== -1) return "action-call";
+  if (lower.indexOf("raise") !== -1 || lower.indexOf("bet") !== -1) return "action-raise";
+  return "action-raise";
+}
+
+// Determine stack health class based on big blinds remaining
+function _stackClass(stack, bb) {
+  if (!bb || bb <= 0) bb = 10;
+  var bbs = stack / bb;
+  if (bbs < 10) return "stack-critical";
+  if (bbs < 20) return "stack-warning";
+  return "stack-healthy";
+}
+
 function renderPlayers(state) {
   var container = el("players");
   var currentId = state.current_player_id;
@@ -156,6 +185,32 @@ function renderPlayers(state) {
   var dealerIdx = state.dealer_index != null ? state.dealer_index : -1;
   var sbIdx = state.small_blind_index != null ? state.small_blind_index : -1;
   var bbIdx = state.big_blind_index != null ? state.big_blind_index : -1;
+  var bb = (state.config && state.config.big_blind) || 10;
+  var isHandOver = state.phase === "hand_over" || state.phase === "showdown";
+
+  // Track per-player actions: reset on new hand
+  var handNum = state.hands_played || 0;
+  if (handNum !== _lastHandNum) {
+    playerLastActions = {};
+    _lastHandNum = handNum;
+  }
+  // Record latest action
+  var la = state.last_action;
+  if (la && la.player_id && la.action_label) {
+    var trackKey = la.player_id + "|" + la.action_label + "|" + (la.thinking || "");
+    if (trackKey !== _lastActionTrackKey) {
+      _lastActionTrackKey = trackKey;
+      playerLastActions[la.player_id] = la.action_label;
+    }
+  }
+
+  // Build winner set for highlight
+  var winnerIds = {};
+  if (isHandOver && state.winners) {
+    for (var wi = 0; wi < state.winners.length; wi++) {
+      winnerIds[state.winners[wi].player_id] = true;
+    }
+  }
 
   // Index existing player divs by player id
   var existingDivs = {};
@@ -181,12 +236,13 @@ function renderPlayers(state) {
       existing.style.top = pos.top;
       existing.style.left = pos.left;
 
-      // Update className
+      // Update className (including winner-highlight)
       var cls = "player";
       if (p.folded || p.busted) cls += " folded";
       if (p.busted) cls += " busted";
       if (p.id === currentId) cls += " current-turn";
       if (p.id === HUMAN_ID) cls += " is-human";
+      if (winnerIds[p.id]) cls += " winner-highlight";
       if (existing.className !== cls) existing.className = cls;
 
       // Update name + badges
@@ -199,15 +255,25 @@ function renderPlayers(state) {
       var nameHTML = label + badges;
       if (nameEl.innerHTML !== nameHTML) nameEl.innerHTML = nameHTML;
 
-      // Update stack
+      // Update stack with color coding
       var stackEl = existing.querySelector(".stack");
       var stackText = p.busted ? "BUST" : "Stack: " + p.stack;
       if (stackEl.textContent !== stackText) stackEl.textContent = stackText;
+      var sClass = "stack" + (p.busted ? "" : " " + _stackClass(p.stack, bb));
+      if (stackEl.className !== sClass) stackEl.className = sClass;
 
-      // Update bet
+      // Update bet — show last action inline when available
       var betEl = existing.querySelector(".bet");
-      var betText = p.busted ? "" : "Bet: " + p.current_bet;
-      if (betEl.textContent !== betText) betEl.textContent = betText;
+      var pAction = playerLastActions[p.id] || "";
+      if (pAction && !p.busted) {
+        if (betEl.textContent !== pAction) betEl.textContent = pAction;
+        var bCls = "bet action-inline " + _actionClass(pAction);
+        if (betEl.className !== bCls) betEl.className = bCls;
+      } else {
+        var betText = p.busted ? "" : "Bet: " + p.current_bet;
+        if (betEl.textContent !== betText) betEl.textContent = betText;
+        if (betEl.className !== "bet") betEl.className = "bet";
+      }
 
       // Only rebuild cards if they actually changed
       var newCK = cardsKey(p);
@@ -236,6 +302,7 @@ function renderPlayers(state) {
       if (p.busted) cls += " busted";
       if (p.id === currentId) cls += " current-turn";
       if (p.id === HUMAN_ID) cls += " is-human";
+      if (winnerIds[p.id]) cls += " winner-highlight";
       div.className = cls;
 
       div.style.top = pos.top;
@@ -250,10 +317,24 @@ function renderPlayers(state) {
       var ck = cardsKey(p);
       div.setAttribute("data-cards", ck);
 
+      // Stack class
+      var sClass = p.busted ? "stack" : "stack " + _stackClass(p.stack, bb);
+
+      // Bet or inline action
+      var pAction = playerLastActions[p.id] || "";
+      var betContent, betCls;
+      if (pAction && !p.busted) {
+        betContent = escapeHtml(pAction);
+        betCls = "bet action-inline " + _actionClass(pAction);
+      } else {
+        betContent = p.busted ? "" : "Bet: " + p.current_bet;
+        betCls = "bet";
+      }
+
       div.innerHTML =
         '<div class="name">' + label + badges + '</div>' +
-        '<div class="stack">' + (p.busted ? "BUST" : "Stack: " + p.stack) + '</div>' +
-        '<div class="bet">' + (p.busted ? "" : "Bet: " + p.current_bet) + '</div>' +
+        '<div class="' + sClass + '">' + (p.busted ? "BUST" : "Stack: " + p.stack) + '</div>' +
+        '<div class="' + betCls + '">' + betContent + '</div>' +
         '<div class="cards"></div>';
       var cardsEl = div.querySelector(".cards");
       if (p.busted) {
@@ -771,7 +852,7 @@ function renderActions(state) {
       allinBtn.textContent = "All In (" + maxAmt + ")";
       allinBtn.onclick = function () {
         raiseOpen = false;
-        sendAction({ type: "raise", amount: maxAmt });
+        sendAction({ type: "raise", amount: maxAmt, _allin: true });
       };
       mainRow.appendChild(allinBtn);
 
@@ -882,6 +963,20 @@ function renderState(state) {
 }
 
 function sendAction(action) {
+  // Build the action label locally so the human's inline display updates
+  // immediately and reliably, without depending on the server's last_action.
+  var atype = action.type || "?";
+  var actionLabel;
+  if (action._allin) {
+    actionLabel = "ALL IN";
+  } else if (atype === "raise") {
+    actionLabel = "raise to " + action.amount;
+  } else if (atype === "call") {
+    actionLabel = "call " + (action.amount || "");
+  } else {
+    actionLabel = atype;
+  }
+
   fetch(API + "/games/" + gameId + "/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -892,7 +987,13 @@ function sendAction(action) {
       if (!r.ok) return r.text().then(function (t) { throw new Error(t); });
       return r.json();
     })
-    .then(function (s) { if (s) renderState(s); })
+    .then(function (s) {
+      if (s) {
+        // Set the human's action before rendering so the player box picks it up
+        playerLastActions[HUMAN_ID] = actionLabel;
+        renderState(s);
+      }
+    })
     .catch(function (e) {
       el("message").textContent = "Error: " + (e.message || "failed");
     });

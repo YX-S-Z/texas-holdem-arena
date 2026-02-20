@@ -369,6 +369,23 @@ def classify_personality(row) -> tuple[str, str]:
 
 # ── Visualizations ─────────────────────────────────────────────────────────────
 
+def _label_rect(cx, cy, name_len, x_scale, y_scale, ha):
+    """Return (x0, y0, x1, y1) of a label's bounding box in normalised coords.
+    cx/cy are the label anchor in data coords; ha is 'left' or 'right'."""
+    # Approximate width = 1.1 chars × name length in data-x units
+    w = name_len * 1.1 * x_scale
+    h = 1.0 * y_scale  # one line height
+    if ha == "left":
+        return (cx / 100.0, cy, (cx + w) / 100.0, cy + h)
+    else:
+        return ((cx - w) / 100.0, cy, cx / 100.0, cy + h)
+
+
+def _rects_overlap(a, b):
+    """Check whether two (x0,y0,x1,y1) rectangles overlap."""
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
 def plot_aggression_scatter(metrics: pd.DataFrame, out: Path):
     """VPIP vs AF scatter — classic player-type quadrant chart."""
     if not MATPLOTLIB_AVAILABLE:
@@ -380,20 +397,126 @@ def plot_aggression_scatter(metrics: pd.DataFrame, out: Path):
     ax.axhline(1.5, color="#BDBDBD", linewidth=1, linestyle="--")
     ax.axvline(25,  color="#BDBDBD", linewidth=1, linestyle="--")
 
+    ymax = max(5.5, metrics["_af_raw"].max() + 1.0)
+
     ax.text(12.5, 0.15, "Nit/Rock", ha="center", color="#9E9E9E", fontsize=9, style="italic")
     ax.text(62.5, 0.15, "Fish / Calling Station", ha="center", color="#FF9800", fontsize=9, style="italic")
-    ymax = max(5.5, metrics["_af_raw"].max() + 0.6)
-    ax.text(12.5, ymax * 0.88, "TAG", ha="center", color="#2196F3", fontsize=10, fontweight="bold")
-    ax.text(62.5, ymax * 0.88, "LAG", ha="center", color="#F44336", fontsize=10, fontweight="bold")
+    ax.text(12.5, ymax * 0.90, "TAG", ha="center", color="#2196F3", fontsize=10, fontweight="bold")
+    ax.text(62.5, ymax * 0.90, "LAG", ha="center", color="#F44336", fontsize=10, fontweight="bold")
 
+    # Collect data points
+    xs, ys, names, clrs = [], [], [], []
     for pid, row in metrics.iterrows():
         personality, _ = classify_personality(row)
         color = PERSONALITY_COLORS.get(personality, "#607D8B")
-        x, y  = row["vpip_pct"], row["_af_raw"]
-        ax.scatter(x, y, color=color, s=220, zorder=5, edgecolors="white", linewidth=2)
-        ax.annotate(row["display_name"], (x, y),
-                    textcoords="offset points", xytext=(10, 4),
-                    fontsize=8.5, color="#333")
+        xs.append(float(row["vpip_pct"]))
+        ys.append(float(row["_af_raw"]))
+        names.append(row["display_name"])
+        clrs.append(color)
+
+    # Draw circles with transparency so overlapping dots remain visible
+    for i in range(len(xs)):
+        ax.scatter(xs[i], ys[i], color=clrs[i], s=220, zorder=5,
+                   edgecolors="white", linewidth=2, alpha=0.8)
+
+    # ── Greedy close-proximity label placement ──────────────────────────
+    # For each label, try 8 directions close to the circle and pick the
+    # position with the least overlap against already-placed labels and
+    # all data-point circles.
+    #
+    # Offsets are in matplotlib "offset points" — small and close to the dot.
+    candidate_offsets = [
+        ( 10,   6, "left"),    # right-up  (default)
+        ( 10,  -8, "left"),    # right-down
+        (-10,   6, "right"),   # left-up
+        (-10,  -8, "right"),   # left-down
+        (  0,  14, "center"),  # above
+        (  0, -16, "center"),  # below
+        ( 14,  -1, "left"),    # far right
+        (-14,  -1, "right"),   # far left
+        ( 10,  16, "left"),    # right-far-up
+        (-10,  16, "right"),   # left-far-up
+        ( 10, -18, "left"),    # right-far-down
+        (-10, -18, "right"),   # left-far-down
+    ]
+
+    # Approximate conversion factors: offset points → data-coord units
+    # fig is 9×7 inches at 100 dpi ≈ 900×700 pt; axes spans 0–100 and 0–ymax
+    pts_to_x = 100.0 / 630.0   # ~0.16 data-x per offset-point
+    pts_to_y = ymax  / 490.0   # data-y per offset-point
+
+    # Circle radius in data-coords (for collision with dots)
+    dot_rx = 2.5   # x data units
+    dot_ry = ymax * 0.035
+
+    placed = []  # list of (x0, y0, x1, y1) in data coords
+
+    for i in range(len(xs)):
+        best_offset = candidate_offsets[0]
+        best_penalty = float("inf")
+
+        for ox, oy, ha in candidate_offsets:
+            # Label anchor in data coords
+            lx = xs[i] + ox * pts_to_x
+            ly = ys[i] + oy * pts_to_y
+
+            # Bounding box of label (rough)
+            name_w = len(names[i]) * 1.05 * pts_to_x * 6.5  # char width in data-x
+            name_h = 1.0 * pts_to_y * 12   # line height in data-y
+            if ha == "left":
+                rect = (lx, ly - name_h / 2, lx + name_w, ly + name_h / 2)
+            elif ha == "right":
+                rect = (lx - name_w, ly - name_h / 2, lx, ly + name_h / 2)
+            else:  # center
+                rect = (lx - name_w / 2, ly - name_h / 2, lx + name_w / 2, ly + name_h / 2)
+
+            penalty = 0.0
+
+            # Penalty for overlapping already-placed labels
+            for pr in placed:
+                if _rects_overlap(rect, pr):
+                    # Amount of overlap area
+                    ox0 = max(rect[0], pr[0])
+                    oy0 = max(rect[1], pr[1])
+                    ox1 = min(rect[2], pr[2])
+                    oy1 = min(rect[3], pr[3])
+                    penalty += (ox1 - ox0) * (oy1 - oy0) * 100
+
+            # Penalty for overlapping any data-point circle
+            for j in range(len(xs)):
+                # Circle as a rect for simplicity
+                cr = (xs[j] - dot_rx, ys[j] - dot_ry, xs[j] + dot_rx, ys[j] + dot_ry)
+                if _rects_overlap(rect, cr):
+                    penalty += 10
+
+            # Mild penalty for going out of axis bounds
+            if rect[0] < 0 or rect[2] > 100:
+                penalty += 50
+            if rect[1] < 0 or rect[3] > ymax:
+                penalty += 50
+
+            if penalty < best_penalty:
+                best_penalty = penalty
+                best_offset = (ox, oy, ha)
+
+        ox, oy, ha = best_offset
+
+        # Record placed bounding box
+        lx = xs[i] + ox * pts_to_x
+        ly = ys[i] + oy * pts_to_y
+        name_w = len(names[i]) * 1.05 * pts_to_x * 6.5
+        name_h = 1.0 * pts_to_y * 12
+        if ha == "left":
+            placed.append((lx, ly - name_h / 2, lx + name_w, ly + name_h / 2))
+        elif ha == "right":
+            placed.append((lx - name_w, ly - name_h / 2, lx, ly + name_h / 2))
+        else:
+            placed.append((lx - name_w / 2, ly - name_h / 2, lx + name_w / 2, ly + name_h / 2))
+
+        ax.annotate(names[i], (xs[i], ys[i]),
+                    textcoords="offset points", xytext=(ox, oy),
+                    fontsize=8.5, color="#333", ha=ha, va="center",
+                    zorder=10)
 
     legend_elements = [
         Line2D([0], [0], marker="o", color="w", markerfacecolor=c,

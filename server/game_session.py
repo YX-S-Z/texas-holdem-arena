@@ -119,6 +119,12 @@ def get_last_action(game_id: str) -> Optional[Dict[str, Any]]:
     return s["last_action"] if s else None
 
 
+def set_last_action(game_id: str, action: Dict[str, Any]) -> None:
+    s = _sessions.get(game_id)
+    if s:
+        s["last_action"] = action
+
+
 def _update_bust_order(session: Dict[str, Any]) -> None:
     """Check for any newly 0-chip players and record them in bust_order."""
     bust_order = session["bust_order"]
@@ -324,7 +330,10 @@ def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
 
         # Format a human-readable action label
         atype = action.get("type", "?")
-        if atype == "raise":
+        pre_stack = _player_pre.get("stack", 0)
+        if (atype == "raise" or atype == "call") and action.get("amount") == pre_stack and pre_stack > 0:
+            action_label = "ALL IN"
+        elif atype == "raise":
             action_label = f"raise to {action.get('amount')}"
         elif atype == "call":
             action_label = f"call {action.get('amount')}"

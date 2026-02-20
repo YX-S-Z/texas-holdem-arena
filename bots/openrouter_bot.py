@@ -42,6 +42,7 @@ _MODEL_REGISTRY: Dict[str, Tuple[str, str]] = {
     # ── Google ───────────────────────────────────────────────────────────────
     "gemini":        ("google/gemini-3-flash-preview", "Gemini 3 Flash"),
     "gemini-pro":    ("google/gemini-3-pro-preview",   "Gemini 3 Pro"),
+    "gemini-3.1-pro": ("google/gemini-3.1-pro-preview", "Gemini 3.1 Pro"),
     # ── Qwen ─────────────────────────────────────────────────────────────────
     "qwen":          ("qwen/qwen3-max", "Qwen3 Max"),
     "qwen-3.5":     ("qwen/qwen3.5-397b-a17b", "Qwen3.5"),

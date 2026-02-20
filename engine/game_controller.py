@@ -110,13 +110,19 @@ class GameController:
         the main pot (lowest all-in level) to the largest side pot.
         Folded players' chips are included in the amounts but they are never
         eligible to win.
+
+        Uses ALL players' commitment levels (not just non-folded) so that
+        chips from folded players who committed more than all remaining
+        non-folded players are properly captured and redistributed.
         """
         non_folded = [p for p in self.players if not p.folded]
         if not non_folded:
             return []
-        # Unique commitment levels among non-folded players, sorted ascending.
-        levels = sorted(set(p.total_committed for p in non_folded))
-        side_pots: List[Dict[str, Any]] = []
+        # Unique commitment levels among ALL players, sorted ascending.
+        levels = sorted(set(
+            p.total_committed for p in self.players if p.total_committed > 0
+        ))
+        raw_pots: List[Dict[str, Any]] = []
         prev = 0
         for level in levels:
             # Every player (including folded) contributes up to this level.
@@ -126,9 +132,18 @@ class GameController:
             )
             eligible = [p for p in non_folded if p.total_committed >= level]
             if amount > 0:
-                side_pots.append({"amount": amount, "eligible": eligible})
+                raw_pots.append({"amount": amount, "eligible": eligible})
             prev = level
-        return side_pots
+        # Merge pots with no eligible players (dead money from folded players
+        # who committed beyond all non-folded) into the nearest lower pot.
+        merged: List[Dict[str, Any]] = []
+        for pot in raw_pots:
+            if pot["eligible"]:
+                merged.append(pot)
+            elif merged:
+                merged[-1]["amount"] += pot["amount"]
+            # else: all players folded (shouldn't happen; fast path catches it)
+        return merged
 
     def _run_showdown(self) -> None:
         """Award pot(s) to winner(s), respecting side pots for all-in players."""

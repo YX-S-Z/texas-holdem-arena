@@ -170,6 +170,7 @@ Each PNG is prefixed with a zero-padded counter so frames sort naturally. The MP
 | `gpt-4o` | GPT-4o |
 | `gemini` / `gemini-flash` | Gemini 3 Flash |
 | `gemini-pro` | Gemini 3 Pro |
+| `gemini-3.1-pro` | Gemini 3.1 Pro |
 | `qwen` | Qwen3 Max |
 | `qwen-3.5` | Qwen3.5 |
 | `qwen-32b` | Qwen3 32B |
@@ -251,3 +252,17 @@ python arena.py --players human random random
 
 - `random` — picks a uniformly random legal action
 - `simple` — always checks or calls, never raises
+
+---
+
+## UI Features
+
+The browser interface includes several visual enhancements for a polished poker experience:
+
+- **Felt-textured table** with wood-grain rim and subtle lighting
+- **Inline action labels** — each player's last action (FOLD, CHECK, CALL, RAISE) is displayed directly in their box, replacing the bet amount
+- **Fancy ALL IN animation** — all-in moves get a shimmering gold-to-red gradient with a glowing pulse effect
+- **Stack health indicators** — chip counts are color-coded green/yellow/red based on big blinds remaining
+- **Winner highlight** — winning players glow at showdown
+- **Thinking log sidebar** — spectator mode shows each bot's reasoning; human mode shows an action log
+- **Game-over leaderboard** — ranked summary with medals, bust order, and per-model error statistics

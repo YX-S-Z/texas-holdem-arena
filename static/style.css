@@ -542,6 +542,23 @@ header h1 {
 
 /* Seat positions are computed dynamically in app.js via inline styles */
 
+/* ── Chip history chart ─────────────────────────────────────────── */
+
+#chip-chart-container {
+  height: 280px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(60, 120, 60, 0.4);
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#chip-chart-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* ── Thinking panel ─────────────────────────────────────────────── */
 
 #thinking-panel {
@@ -1045,8 +1062,17 @@ body.sidebar-active #right-panel {
   flex-shrink: 0;
   position: sticky;
   top: 1rem;
-  /* Cap at roughly the table height so it never overflows the viewport */
-  max-height: 620px;
+  max-height: 750px;
+}
+
+/* Spectator mode: show latest thinking only, hide scrolling log */
+body.spectator-mode #thinking-log-container {
+  display: none !important;
+}
+
+/* Human mode: hide the live thinking panel (action log is shown instead) */
+body.human-mode #thinking-panel {
+  display: none !important;
 }
 
 /* In the sidebar the thinking panel needs no top margin */

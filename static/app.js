@@ -15,6 +15,9 @@ var playerLastActions = {};  // player_id -> action_label
 var _lastActionTrackKey = null;
 var _lastHandNum = -1;
 
+// Chip history tracking for the chart
+var chipHistory = [];  // array of {hand: N, stacks: {pid: chips}}
+
 // Read URL params: ?game_id=xxx&spectator=1&arena=1&hands=N
 var _params = new URLSearchParams(window.location.search);
 var SPECTATOR_MODE = _params.get("spectator") === "1";
@@ -36,6 +39,7 @@ function clearGame() {
   playerLastActions = {};
   _lastActionTrackKey = null;
   _lastHandNum = -1;
+  chipHistory = [];
   el("game-id").textContent = "";
   el("players").innerHTML = "";
   el("community-cards").innerHTML = "";
@@ -161,7 +165,7 @@ function cardsKey(p) {
 function _actionClass(label) {
   if (!label) return "";
   var lower = label.toLowerCase();
-  if (lower.indexOf("all") !== -1 || lower.indexOf("all-in") !== -1 || lower.indexOf("allin") !== -1) return "action-allin";
+  if (lower.indexOf("all-in") !== -1 || lower.indexOf("allin") !== -1 || lower === "all in" || lower.indexOf("all in") !== -1) return "action-allin";
   if (lower.indexOf("fold") !== -1) return "action-fold";
   if (lower.indexOf("check") !== -1) return "action-check";
   if (lower.indexOf("call") !== -1) return "action-call";
@@ -670,14 +674,13 @@ function renderThinking(lastAction) {
   if (!lastAction) return;
 
   if (SPECTATOR_MODE) {
-    // Spectator: update the live thinking panel + append to log.
+    // Spectator: update the live thinking panel only (no scrolling log).
     var key = _thinkingKey(lastAction);
     if (key === lastThinkingKey) return;
     lastThinkingKey = key;
     var panel = el("thinking-panel");
     panel.innerHTML = _buildThinkingHtml(lastAction);
     panel.style.display = "block";
-    appendToThinkingLog(lastAction, key);
   } else {
     // Human mode: append action-only entry for every player (no thinking panel).
     appendToThinkingLog(lastAction, null);
@@ -702,6 +705,7 @@ function appendToThinkingLog(lastAction, key) {
 }
 
 function appendHandResultToLog(state) {
+  if (SPECTATOR_MODE) return;  // No scrolling log in spectator mode
   if (state.phase !== "hand_over" && state.phase !== "showdown") return;
   var winners = state.winners;
   if (!winners || !winners.length) return;
@@ -942,6 +946,255 @@ function renderActions(state) {
   msg.textContent = "";
 }
 
+// ── Chip history tracking ─────────────────────────────────────────────────────
+
+function trackChipHistory(state) {
+  if (!state || !state.players) return;
+
+  // Record initial stacks as hand 0 if we have no history yet
+  if (chipHistory.length === 0) {
+    var stacks0 = {};
+    for (var i = 0; i < state.players.length; i++) {
+      var p = state.players[i];
+      stacks0[p.id] = p.stack;
+    }
+    chipHistory.push({ hand: 0, stacks: stacks0 });
+  }
+
+  // Record at end of hand
+  if (state.phase === "hand_over" || state.phase === "showdown") {
+    var handNum = (state.hands_played || 0) + 1;
+    // Dedup: don't record the same hand twice
+    var lastEntry = chipHistory[chipHistory.length - 1];
+    if (lastEntry.hand >= handNum) return;
+    var stacks = {};
+    for (var i = 0; i < state.players.length; i++) {
+      var p = state.players[i];
+      stacks[p.id] = p.stack;
+    }
+    chipHistory.push({ hand: handNum, stacks: stacks });
+  }
+}
+
+// ── Chip history chart renderer ──────────────────────────────────────────────
+
+var CHART_COLORS = [
+  "#4fc3f7", // light blue
+  "#ef5350", // red
+  "#66bb6a", // green
+  "#ffa726", // orange
+  "#ab47bc", // purple
+  "#26c6da", // cyan
+  "#ec407a", // pink
+  "#d4e157", // lime
+  "#8d6e63", // brown
+  "#78909c", // blue grey
+];
+
+function renderChipChart(state) {
+  var canvas = el("chip-chart");
+  if (!canvas || chipHistory.length === 0) return;
+  var container = el("chip-chart-container");
+  var rect = container.getBoundingClientRect();
+  var dpr = window.devicePixelRatio || 1;
+
+  // Size canvas to container
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  var ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  var W = rect.width;
+  var H = rect.height;
+
+  // Clear
+  ctx.clearRect(0, 0, W, H);
+
+  // Gather player IDs from first entry (keeps order stable)
+  var playerIds = Object.keys(chipHistory[0].stacks);
+
+  // Build per-player display names
+  var nameMap = {};
+  if (state && state.players) {
+    for (var i = 0; i < state.players.length; i++) {
+      var p = state.players[i];
+      nameMap[p.id] = p.display_name || p.id;
+    }
+  }
+
+  // Margins — top margin includes space for the legend strip
+  var legendRowH = 16;
+  var legendCols = Math.min(playerIds.length, 5);
+  var numLegendRows = Math.ceil(playerIds.length / legendCols);
+  var ml = 52, mr = 16, mt = 6 + numLegendRows * legendRowH + 8, mb = 34;
+  var cw = W - ml - mr;
+  var ch = H - mt - mb;
+  if (cw < 10 || ch < 10) return;
+
+  // Compute Y range
+  var maxChips = 0;
+  for (var hi = 0; hi < chipHistory.length; hi++) {
+    var s = chipHistory[hi].stacks;
+    for (var pid in s) {
+      if (s[pid] > maxChips) maxChips = s[pid];
+    }
+  }
+  if (maxChips === 0) maxChips = 100;
+  // Round up to nice number
+  var yTop = Math.ceil(maxChips / 100) * 100;
+  if (yTop < maxChips * 1.05) yTop = Math.ceil(maxChips * 1.1 / 100) * 100;
+
+  var maxHand = chipHistory[chipHistory.length - 1].hand;
+  if (maxHand === 0) maxHand = 1;
+
+  function xPos(hand) { return ml + (hand / maxHand) * cw; }
+  function yPos(chips) { return mt + ch - (chips / yTop) * ch; }
+
+  // Grid lines (Y-axis)
+  var ySteps = 5;
+  var yInterval = yTop / ySteps;
+  // Make yInterval a nice number
+  var niceIntervals = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000];
+  for (var ni = 0; ni < niceIntervals.length; ni++) {
+    if (niceIntervals[ni] >= yTop / 6) {
+      yInterval = niceIntervals[ni];
+      break;
+    }
+  }
+
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.07)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  for (var yv = yInterval; yv < yTop; yv += yInterval) {
+    var yy = yPos(yv);
+    ctx.beginPath();
+    ctx.moveTo(ml, yy);
+    ctx.lineTo(ml + cw, yy);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // Axes
+  ctx.strokeStyle = "#555";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(ml, mt);
+  ctx.lineTo(ml, mt + ch);
+  ctx.lineTo(ml + cw, mt + ch);
+  ctx.stroke();
+
+  // Y-axis labels
+  ctx.fillStyle = "#666";
+  ctx.font = "11px Inter, sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (var yv = 0; yv <= yTop; yv += yInterval) {
+    var yy = yPos(yv);
+    ctx.fillText(yv.toString(), ml - 6, yy);
+  }
+
+  // X-axis labels
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  var xLabelStep = Math.max(1, Math.ceil(maxHand / 10));
+  for (var xv = 0; xv <= maxHand; xv += xLabelStep) {
+    var xx = xPos(xv);
+    ctx.fillText(xv.toString(), xx, mt + ch + 6);
+  }
+
+  // Axis titles
+  ctx.fillStyle = "#777";
+  ctx.font = "11px Inter, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("# Hands", ml + cw / 2, mt + ch + 12);
+
+  ctx.save();
+  ctx.translate(12, mt + ch / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText("Chips", 0, 0);
+  ctx.restore();
+
+  // Draw lines per player
+  for (var pi = 0; pi < playerIds.length; pi++) {
+    var pid = playerIds[pi];
+    var color = CHART_COLORS[pi % CHART_COLORS.length];
+
+    // Find bust point (first entry where chips = 0 after having chips > 0)
+    var bustHandIdx = -1;
+    for (var hi = 1; hi < chipHistory.length; hi++) {
+      if ((chipHistory[hi].stacks[pid] || 0) === 0 && (chipHistory[hi - 1].stacks[pid] || 0) > 0) {
+        bustHandIdx = hi;
+        break;
+      }
+    }
+
+    // Draw solid line (up to bust or full length)
+    var solidEnd = bustHandIdx >= 0 ? bustHandIdx + 1 : chipHistory.length;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (var hi = 0; hi < solidEnd; hi++) {
+      var chips = chipHistory[hi].stacks[pid] || 0;
+      var x = xPos(chipHistory[hi].hand);
+      var y = yPos(chips);
+      if (hi === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    // Dashed line after bust (flat at 0)
+    if (bustHandIdx >= 0 && bustHandIdx < chipHistory.length - 1) {
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(xPos(chipHistory[bustHandIdx].hand), yPos(0));
+      for (var hi = bustHandIdx + 1; hi < chipHistory.length; hi++) {
+        ctx.lineTo(xPos(chipHistory[hi].hand), yPos(0));
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+
+    // Dots at data points
+    ctx.fillStyle = color;
+    for (var hi = 0; hi < chipHistory.length; hi++) {
+      var chips = chipHistory[hi].stacks[pid] || 0;
+      var x = xPos(chipHistory[hi].hand);
+      var y = yPos(chips);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+
+  // Legend — horizontal strip at the top of the chart
+  var colWidth = Math.floor(cw / legendCols);
+  ctx.font = "11px Inter, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  for (var pi = 0; pi < playerIds.length; pi++) {
+    var col = pi % legendCols;
+    var row = Math.floor(pi / legendCols);
+    var lx = ml + col * colWidth;
+    var ly = 6 + row * legendRowH + legendRowH / 2;
+    var color = CHART_COLORS[pi % CHART_COLORS.length];
+    var name = nameMap[playerIds[pi]] || playerIds[pi];
+    // Truncate name to fit column
+    var maxNameLen = Math.max(6, Math.floor(colWidth / 7) - 3);
+    if (name.length > maxNameLen) name = name.substring(0, maxNameLen - 1) + "…";
+
+    // Colored square
+    ctx.fillStyle = color;
+    ctx.fillRect(lx, ly - 4, 8, 8);
+
+    // Name
+    ctx.fillStyle = "#bbb";
+    ctx.fillText(name, lx + 12, ly);
+  }
+}
+
 function renderState(state) {
   if (!state) return;
   lastStateJSON = JSON.stringify(state);
@@ -949,6 +1202,8 @@ function renderState(state) {
   renderCommunity(state.community_cards || []);
   renderPot(state.pot || 0);
   renderProgress(state);
+  trackChipHistory(state);
+  renderChipChart(state);
   renderThinking(state.last_action || null);
   appendHandResultToLog(state);
   renderActions(state);

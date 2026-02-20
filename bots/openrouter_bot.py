@@ -75,7 +75,7 @@ for _alias, (_mid, _dname) in _MODEL_REGISTRY.items():
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # (connect_timeout, read_timeout) — read timeout is per-chunk inactivity,
 # not total time; 10s to establish the connection, 45s between chunks.
-REQUEST_TIMEOUT = (10, 45)
+REQUEST_TIMEOUT = (10, 90)
 
 # Model used to rescue unparseable responses from other LLMs.
 GUARDRAIL_MODEL = "anthropic/claude-sonnet-4-6"

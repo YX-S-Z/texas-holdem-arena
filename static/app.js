@@ -979,16 +979,16 @@ function trackChipHistory(state) {
 // ── Chip history chart renderer ──────────────────────────────────────────────
 
 var CHART_COLORS = [
-  "#4fc3f7", // light blue
-  "#ef5350", // red
-  "#66bb6a", // green
-  "#ffa726", // orange
-  "#ab47bc", // purple
-  "#26c6da", // cyan
-  "#ec407a", // pink
-  "#d4e157", // lime
-  "#8d6e63", // brown
-  "#78909c", // blue grey
+  "#e6194b", // red
+  "#3cb44b", // green
+  "#4363d8", // blue
+  "#f58231", // orange
+  "#911eb4", // purple
+  "#42d4f4", // cyan
+  "#f032e6", // magenta
+  "#bfef45", // lime
+  "#fabed4", // pink
+  "#dcbeff", // lavender
 ];
 
 function renderChipChart(state) {

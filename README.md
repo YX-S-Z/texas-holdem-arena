@@ -85,6 +85,23 @@ What happens:
 
 ---
 
+## Mode 3 — Random bots: play without an API key
+
+Use `random` or `simple` bots — no API key required:
+
+```bash
+# Watch random bots play each other
+python arena.py --players random random random random --hands 10
+
+# Human vs. random bots
+python arena.py --players human random random
+```
+
+- `random` — picks a uniformly random legal action
+- `simple` — always checks or calls, never raises
+
+---
+
 ## Advanced example — full configuration
 
 ```bash
@@ -108,8 +125,6 @@ API_KEY="your-openrouter-api-key-here" \
 | `--port` | 8000 | Local port for the web UI |
 | `--key` | env `API_KEY` | API key (alternative to env var) |
 | `--screenshots` | off | Capture a PNG after every action and render a `game.mp4` at the end (see below) |
-| `--auto-exit` | off | Exit automatically when all hands finish — useful for scripted/batch runs |
-| `--no-browser` | off | Skip opening a browser window — useful for headless/batch runs |
 
 ---
 
@@ -238,23 +253,6 @@ Models are classified into four canonical poker archetypes based on VPIP% and Ag
 
 ---
 
-## Playing without an API key
-
-Use `random` or `simple` bots — no key required:
-
-```bash
-# Random bots only
-python arena.py --players random random random random --hands 10
-
-# Human vs. random bots
-python arena.py --players human random random
-```
-
-- `random` — picks a uniformly random legal action
-- `simple` — always checks or calls, never raises
-
----
-
 ## UI Features
 
 The browser interface includes several visual enhancements for a polished poker experience:
@@ -264,5 +262,6 @@ The browser interface includes several visual enhancements for a polished poker 
 - **Fancy ALL IN animation** — all-in moves get a shimmering gold-to-red gradient with a glowing pulse effect
 - **Stack health indicators** — chip counts are color-coded green/yellow/red based on big blinds remaining
 - **Winner highlight** — winning players glow at showdown
-- **Thinking log sidebar** — spectator mode shows each bot's reasoning; human mode shows an action log
+- **Chip history chart** — a live line chart in the sidebar tracks every player's chip count over hands, with distinct colors and dashed lines for busted players
+- **Thinking log sidebar** — spectator mode shows each bot's latest reasoning; human mode shows a scrollable action log
 - **Game-over leaderboard** — ranked summary with medals, bust order, and per-model error statistics

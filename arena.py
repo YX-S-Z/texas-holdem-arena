@@ -287,6 +287,7 @@ def _spectator_loop(
                         # Give the browser time to render the leaderboard overlay.
                         ss.capture("leaderboard", extra_wait=4.0)
                         ss.stop()
+                        ss = None  # prevent double-stop on Ctrl+C
                     if auto_exit:
                         print("Batch mode — exiting cleanly.")
                         sys.exit(0)

@@ -268,10 +268,29 @@ The browser interface includes several visual enhancements for a polished poker 
 
 ---
 
+## Replay Data
+
+The `replay_data/` folder contains CSV logs from a full 10-player, 50-hand tournament:
+
+| File | Description |
+|---|---|
+| `hands.csv` | Per-hand results: winner(s), winning hand, pot size |
+| `actions.csv` | Every individual action (fold, call, raise, etc.) with full game state |
+
+These are the raw logs behind the leaderboard and video on the [project page](https://yx-s-z.github.io/poker-arena/).
+
+---
+
+## Acknowledgments
+
+Nearly all code in this project was written with the help of [Cursor](https://cursor.sh) and [Claude Code](https://claude.ai/claude-code). If you run into trouble reproducing or extending the project, try using one of these tools :)
+
+---
+
 ## Citation
 
 ```bibtex
-@article{zhai2026pokerarena,
+@misc{zhai2026pokerarena,
   author = {Zhai, Yuexiang},
   title = {Poker Arena: LLM Poker Battles},
   year = {2026},

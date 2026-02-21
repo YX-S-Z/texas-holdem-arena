@@ -1,0 +1,51 @@
+timestamp,game_id,hand_number,winner_player_ids,winner_display_names,winner_amounts,winner_hand_names,pot
+2026-02-20T17:03:28.332808+00:00,game_0,0,player_1,GPT 5.2,45,,45
+2026-02-20T17:11:37.028551+00:00,game_0,1,player_2,Gemini 3.1 Pro,1370,,1370
+2026-02-20T17:22:08.629692+00:00,game_0,2,player_3|player_9,Qwen3.5|LLAMA 4,135|135,three of a kind|three of a kind,270
+2026-02-20T17:34:29.788143+00:00,game_0,3,player_9,LLAMA 4,45,,45
+2026-02-20T17:40:58.209474+00:00,game_0,4,player_8|player_7,Grok 4.1 fast|DeepSeek 3.2,2165|710,two pair|two pair,2875
+2026-02-20T17:47:47.024749+00:00,game_0,5,player_6,GLM 5,150,,150
+2026-02-20T17:54:03.653495+00:00,game_0,6,player_9,LLAMA 4,345,full house,345
+2026-02-20T18:09:05.542737+00:00,game_0,7,player_3,Qwen3.5,1910,three of a kind,1910
+2026-02-20T18:19:50.506709+00:00,game_0,8,player_4|player_6,Kimi K2.5|GLM 5,240|225,two pair|two pair,465
+2026-02-20T18:23:50.695914+00:00,game_0,9,player_5,Minimax M2.5,75,,75
+2026-02-20T18:28:00.425389+00:00,game_0,10,player_8,Grok 4.1 fast,170,,170
+2026-02-20T18:35:03.425965+00:00,game_0,11,player_1,GPT 5.2,280,two pair,280
+2026-02-20T18:41:07.478091+00:00,game_0,12,player_5,Minimax M2.5,440,pair,440
+2026-02-20T18:55:01.768916+00:00,game_0,13,player_4|player_8,Kimi K2.5|Grok 4.1 fast,760|1110,two pair|pair,1870
+2026-02-20T18:59:56.548452+00:00,game_0,14,player_3,Qwen3.5,235,two pair,235
+2026-02-20T19:12:46.899304+00:00,game_0,15,player_4,Kimi K2.5,205,three of a kind,205
+2026-02-20T19:18:02.278829+00:00,game_0,16,player_8,Grok 4.1 fast,25,two pair,25
+2026-02-20T19:31:17.573079+00:00,game_0,17,player_8,Grok 4.1 fast,705,,705
+2026-02-20T19:34:43.603297+00:00,game_0,18,player_1,GPT 5.2,35,,35
+2026-02-20T20:01:47.342849+00:00,game_0,19,player_2,Gemini 3.1 Pro,2695,pair,2695
+2026-02-20T20:09:43.631579+00:00,game_0,20,player_1,GPT 5.2,160,,160
+2026-02-20T20:14:52.152450+00:00,game_0,21,player_5,Minimax M2.5,505,pair,505
+2026-02-20T20:31:32.633754+00:00,game_0,22,player_7,DeepSeek 3.2,825,pair,825
+2026-02-20T20:45:49.783719+00:00,game_0,23,player_5,Minimax M2.5,45,,45
+2026-02-20T20:52:31.456178+00:00,game_0,24,player_3,Qwen3.5,1240,pair,1240
+2026-02-20T20:57:53.539497+00:00,game_0,25,player_5,Minimax M2.5,175,flush,175
+2026-02-20T21:04:39.851608+00:00,game_0,26,player_6,GLM 5,105,,105
+2026-02-20T21:09:41.658730+00:00,game_0,27,player_1,GPT 5.2,1745,pair,1745
+2026-02-20T21:26:26.571571+00:00,game_0,28,player_4,Kimi K2.5,515,two pair,515
+2026-02-20T21:41:42.688268+00:00,game_0,29,player_1,GPT 5.2,420,,420
+2026-02-20T21:59:43.378200+00:00,game_0,30,player_4,Kimi K2.5,415,pair,415
+2026-02-20T22:07:17.157115+00:00,game_0,31,player_3,Qwen3.5,2550,two pair,2550
+2026-02-20T22:13:55.436445+00:00,game_0,32,player_4,Kimi K2.5,45,,45
+2026-02-20T22:23:04.027894+00:00,game_0,33,player_4,Kimi K2.5,70,,70
+2026-02-20T22:29:23.499768+00:00,game_0,34,player_2,Gemini 3.1 Pro,520,three of a kind,520
+2026-02-20T22:36:58.079099+00:00,game_0,35,player_3,Qwen3.5,430,two pair,430
+2026-02-20T22:42:59.537011+00:00,game_0,36,player_8,Grok 4.1 fast,40,,40
+2026-02-20T22:46:26.540473+00:00,game_0,37,player_1,GPT 5.2,15,,15
+2026-02-20T23:00:27.240386+00:00,game_0,38,player_4,Kimi K2.5,755,,755
+2026-02-20T23:17:52.529535+00:00,game_0,39,player_4,Kimi K2.5,720,two pair,720
+2026-02-20T23:19:49.248590+00:00,game_0,40,player_8,Grok 4.1 fast,55,,55
+2026-02-20T23:26:15.356463+00:00,game_0,41,player_4,Kimi K2.5,100,,100
+2026-02-20T23:29:53.146256+00:00,game_0,42,player_2,Gemini 3.1 Pro,2945,two pair,2945
+2026-02-20T23:34:31.235086+00:00,game_0,43,player_7,DeepSeek 3.2,55,pair,55
+2026-02-20T23:36:29.251735+00:00,game_0,44,player_2,Gemini 3.1 Pro,35,,35
+2026-02-20T23:38:50.555803+00:00,game_0,45,player_3,Qwen3.5,55,,55
+2026-02-20T23:42:54.562012+00:00,game_0,46,player_3,Qwen3.5,25,two pair,25
+2026-02-20T23:45:55.815462+00:00,game_0,47,player_3,Qwen3.5,210,,210
+2026-02-20T23:47:04.486453+00:00,game_0,48,player_2,Gemini 3.1 Pro,45,,45
+2026-02-20T23:50:26.240879+00:00,game_0,49,player_4,Kimi K2.5,45,,45

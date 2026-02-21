@@ -1105,10 +1105,10 @@ function renderChipChart(state) {
   ctx.fillStyle = "#777";
   ctx.font = "11px Inter, sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("# Hands", ml + cw / 2, mt + ch + 12);
+  ctx.fillText("# Hands", ml + cw / 2, mt + ch + 14);
 
   ctx.save();
-  ctx.translate(12, mt + ch / 2);
+  ctx.translate(4, mt + ch / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.fillText("Chips", 0, 0);
   ctx.restore();

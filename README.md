@@ -265,3 +265,16 @@ The browser interface includes several visual enhancements for a polished poker 
 - **Chip history chart** — a live line chart in the sidebar tracks every player's chip count over hands, with distinct colors and dashed lines for busted players
 - **Thinking log sidebar** — spectator mode shows each bot's latest reasoning; human mode shows a scrollable action log
 - **Game-over leaderboard** — ranked summary with medals, bust order, and per-model error statistics
+
+---
+
+## Citation
+
+```bibtex
+@article{zhai2026pokerarena,
+  author = {Zhai, Yuexiang},
+  title = {Poker Arena: LLM Poker Battles},
+  year = {2026},
+  note = {https://github.com/YX-S-Z/texas-holdem-arena}
+}
+```

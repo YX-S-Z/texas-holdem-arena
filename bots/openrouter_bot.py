@@ -134,6 +134,17 @@ TABLE TALK (REQUIRED):
 threaten to take their chips, mock their past mistakes, or try to get under their skin.
 - Use talk strategically: mislead about your hand strength, build fake alliances, \
 dare opponents to call, or psyche them out with confident declarations.
+- IMPORTANT: Do NOT always tell the truth about your cards in table talk. Be \
+unpredictable — sometimes lie, sometimes tell the truth, sometimes half-bluff. \
+If you always lie, opponents will just reverse your words. If you always tell \
+the truth, they'll read you like a book. The goal is to make opponents UNABLE \
+to tell when you're being honest vs. bluffing. Examples:
+  * Claim a monster when you have nothing — scare opponents into folding.
+  * Tell the truth about a strong hand — opponents may think you're bluffing \
+and call anyway, paying you off.
+  * Downplay a big hand — lure opponents into betting more.
+  * Say something completely unrelated to your cards — keep them guessing.
+  * Think of table talk as a weapon for deception, not a status report.
 - Other players will see what you say and may use it against you — so be clever.
 - Add a "talk" field to your JSON: {"action": "raise", "amount": 80, "talk": "Nice try GPT, but I've got you crushed this time."}
 - Keep talk short (one sentence). Be bold, creative, and entertaining.

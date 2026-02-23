@@ -23,6 +23,9 @@ from .game_session import (
     get_hands_played,
     get_bust_order,
     get_failure_stats,
+    get_hand_talks,
+    add_hand_talk,
+    get_bluff_mode,
     is_bot_turn,
     apply_bot_action,
     next_hand,
@@ -51,11 +54,13 @@ class CreateGameBody(BaseModel):
     bot_player_ids: Optional[list] = None
     player_models: Optional[dict] = None  # {player_id: model_alias}
     player_names: Optional[dict] = None   # {player_id: display_name}
+    bluff_mode: bool = False
 
 
 class ActionBody(BaseModel):
     player_id: str
     action: dict
+    talk: Optional[str] = None
 
 
 @app.post("/games")
@@ -70,6 +75,7 @@ def api_create_game(body: CreateGameBody):
         bot_player_ids=bot_ids,
         player_models=body.player_models,
         player_names=body.player_names,
+        bluff_mode=body.bluff_mode,
     )
     return {"game_id": game_id}
 
@@ -85,6 +91,8 @@ def api_get_state(game_id: str, viewer_id: Optional[str] = None):
     state["hands_played"] = get_hands_played(game_id)
     state["bust_order"] = get_bust_order(game_id)
     state["failure_stats"] = get_failure_stats(game_id)
+    state["hand_talks"] = get_hand_talks(game_id)
+    state["bluff_mode"] = get_bluff_mode(game_id)
     state["arena_finished"] = get_arena_state().get("finished", False)
     return state
 
@@ -120,7 +128,11 @@ def api_apply_action(game_id: str, body: ActionBody):
         action_amount=body.action.get("amount"),
         thinking=None,
         failure_reason=None,
+        talk=body.talk,
     )
+    # Record human table talk (bluff mode)
+    if body.talk:
+        add_hand_talk(game_id, body.player_id, _p_pre.get("display_name", body.player_id), body.talk)
     # Build last_action summary for human player (same format as bot actions)
     atype = body.action.get("type", "?")
     pre_stack = _p_pre.get("stack", 0)
@@ -137,6 +149,7 @@ def api_apply_action(game_id: str, body: ActionBody):
         "display_name": _p_pre.get("display_name", body.player_id),
         "action_label": action_label,
         "thinking": None,
+        "talk": body.talk,
         "failure_reason": None,
         "raw_response": None,
     })
@@ -145,6 +158,8 @@ def api_apply_action(game_id: str, body: ActionBody):
     state["hands_played"] = get_hands_played(game_id)
     state["bust_order"] = get_bust_order(game_id)
     state["failure_stats"] = get_failure_stats(game_id)
+    state["hand_talks"] = get_hand_talks(game_id)
+    state["bluff_mode"] = get_bluff_mode(game_id)
     state["arena_finished"] = get_arena_state().get("finished", False)
     return state
 
@@ -161,6 +176,8 @@ def api_bot_move(game_id: str, viewer_id: Optional[str] = None):
     state["hands_played"] = get_hands_played(game_id)
     state["bust_order"] = get_bust_order(game_id)
     state["failure_stats"] = get_failure_stats(game_id)
+    state["hand_talks"] = get_hand_talks(game_id)
+    state["bluff_mode"] = get_bluff_mode(game_id)
     state["arena_finished"] = get_arena_state().get("finished", False)
     # True when an action was actually applied; False when the lock was contended
     # (another call is in-flight) or no bot turn is pending.  arena.py uses this
@@ -187,6 +204,8 @@ def api_next_hand(game_id: str, viewer_id: Optional[str] = None):
     state["hands_played"] = get_hands_played(game_id)
     state["bust_order"] = get_bust_order(game_id)
     state["failure_stats"] = get_failure_stats(game_id)
+    state["hand_talks"] = get_hand_talks(game_id)
+    state["bluff_mode"] = get_bluff_mode(game_id)
     state["arena_finished"] = get_arena_state().get("finished", False)
     return state
 

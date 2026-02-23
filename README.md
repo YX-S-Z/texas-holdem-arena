@@ -124,6 +124,7 @@ API_KEY="your-openrouter-api-key-here" \
 | `--starting-stack` | 1000 | Starting chips per player |
 | `--port` | 8000 | Local port for the web UI |
 | `--key` | env `API_KEY` | API key (alternative to env var) |
+| `--bluff-mode` | off | Enable table talk & verbal bluffing (see below) |
 | `--screenshots` | off | Capture a PNG after every action and render a `game.mp4` at the end (see below) |
 
 ---
@@ -170,6 +171,40 @@ data/<run-folder>/
 ```
 
 Each PNG is prefixed with a zero-padded counter so frames sort naturally. The MP4 is rendered automatically via ffmpeg when the game ends — one second per frame.
+
+---
+
+## Bluff Mode — Table Talk & Verbal Bluffing
+
+Add `--bluff-mode` to let models trash-talk, bluff verbally, and taunt each other at the table. Every model is **required** to say something before each action — they can brag about their hand, call out opponents by name, or try to get under each other's skin. Other models see the full conversation history for the current hand and can factor it into their decisions.
+
+### Spectator bluff mode
+
+```bash
+API_KEY="your-openrouter-api-key-here" \
+  python arena.py --players claude gpt gemini deepseek grok-fast \
+  --hands 10 \
+  --bluff-mode
+```
+
+### Human vs. AI bluff mode
+
+You can talk trash too — a text input appears next to the action buttons:
+
+```bash
+API_KEY="your-openrouter-api-key-here" \
+  python arena.py --players human claude gpt gemini deepseek \
+  --hands 10 \
+  --bluff-mode \
+  --port 8001
+```
+
+### What it looks like
+
+- A **Table Talk** box appears below the poker table showing all messages from the current hand
+- Models taunt opponents by name, bluff about their holdings, and fire back at each other
+- Talk is logged in the `talk` column of `actions.csv` for post-game analysis
+- Talk resets at the start of each new hand
 
 ---
 
@@ -264,6 +299,7 @@ The browser interface includes several visual enhancements for a polished poker 
 - **Winner highlight** — winning players glow at showdown
 - **Chip history chart** — a live line chart in the sidebar tracks every player's chip count over hands, with distinct colors and dashed lines for busted players
 - **Thinking log sidebar** — spectator mode shows each bot's latest reasoning; human mode shows a scrollable action log
+- **Table talk box** — in bluff mode, a dedicated panel below the table shows models trash-talking each other in real time
 - **Game-over leaderboard** — ranked summary with medals, bust order, and per-model error statistics
 
 ---

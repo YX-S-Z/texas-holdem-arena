@@ -48,6 +48,9 @@ function clearGame() {
   el("action-buttons").innerHTML = "";
   var modal = el("game-summary-modal");
   if (modal) modal.style.display = "none";
+  var talkBox = el("talk-box");
+  if (talkBox) talkBox.style.display = "none";
+  _lastTalkBoxKey = null;
 }
 
 function escapeHtml(str) {
@@ -627,7 +630,8 @@ function _thinkingKey(lastAction) {
   return (lastAction.player_id || "") + "|" +
          (lastAction.action_label || "") + "|" +
          (lastAction.thinking || "") + "|" +
-         (lastAction.failure_reason || "");
+         (lastAction.failure_reason || "") + "|" +
+         (lastAction.talk || "");
 }
 
 function _failureBadgeHtml(failureReason) {
@@ -656,7 +660,7 @@ function _buildThinkingHtml(lastAction) {
   var actionLabel = lastAction.action_label || "";
   var failure = lastAction.failure_reason || null;
 
-  var html = '<span class="thinking-name">' + escapeHtml(name) + ':</span>';
+  var html = '<span class="thinking-name">\ud83e\udde0 ' + escapeHtml(name) + ':</span>';
   html += _failureBadgeHtml(failure);
   if (thinking) {
     html += ' <span class="thinking-text">' + escapeHtml(thinking) + '</span>';
@@ -665,7 +669,7 @@ function _buildThinkingHtml(lastAction) {
     // Only mark "(fallback)" for true fallbacks; guardrail-rescued actions are real.
     var isTrueFallback = failure && failure !== "parse_error_rescued";
     var label = isTrueFallback ? actionLabel + " (fallback)" : actionLabel;
-    html += '<span class="thinking-action"> → ' + escapeHtml(label) + '</span>';
+    html += '<span class="thinking-action"> \u2192 ' + escapeHtml(label) + '</span>';
   }
   return html;
 }
@@ -765,8 +769,11 @@ function renderActions(state) {
   if (state.phase === "hand_over" || state.phase === "showdown") {
     // Build a player-id → display_name lookup from current state
     var nameMap = {};
-    (state.players || []).forEach(function(p) { nameMap[p.id] = p.display_name || p.id; });
+    (state.players || []).forEach(function(p) {
+      nameMap[p.id] = (!SPECTATOR_MODE && p.id === HUMAN_ID) ? "Human" : (p.display_name || p.id);
+    });
 
+    var winnerText;
     if (state.winners && state.winners.length) {
       var parts = [];
       for (var i = 0; i < state.winners.length; i++) {
@@ -782,11 +789,17 @@ function renderActions(state) {
       // Show hand progress alongside winner when a limit is set
       var handNum = (state.hands_played || 0) + 1;
       var progress = (MAX_HANDS > 0) ? "  [Hand " + handNum + "/" + MAX_HANDS + "]" : "";
-      msg.textContent = "Winner: " + parts.join(", ") + progress;
+      winnerText = "Winner: " + parts.join(", ") + progress;
     } else {
-      msg.textContent = "Hand over.";
+      winnerText = "Hand over.";
     }
-    // Show "Next hand" only when not spectator and the game isn't over yet
+    // Put winner text and "Next hand" button on the same line
+    msg.textContent = "";
+    var handOverRow = document.createElement("div");
+    handOverRow.className = "hand-over-row";
+    var handOverMsg = document.createElement("span");
+    handOverMsg.textContent = winnerText;
+    handOverRow.appendChild(handOverMsg);
     if (!SPECTATOR_MODE && !shouldShowSummary(state)) {
       var nextBtn = document.createElement("button");
       nextBtn.textContent = "Next hand";
@@ -799,8 +812,9 @@ function renderActions(state) {
           })
           .then(function (s) { if (s) renderState(s); });
       };
-      btns.appendChild(nextBtn);
+      handOverRow.appendChild(nextBtn);
     }
+    btns.appendChild(handOverRow);
     return;
   }
 
@@ -809,7 +823,27 @@ function renderActions(state) {
 
   // My turn: show action buttons (never in spectator mode)
   if (isMyTurn && state.legal_actions && state.legal_actions.length > 0) {
-    msg.textContent = "Your turn.";
+    msg.textContent = "";
+
+    // Compact turn row: "Your turn." + talk input + action buttons all inline
+    var turnRow = document.createElement("div");
+    turnRow.className = "turn-row";
+
+    var turnLabel = document.createElement("span");
+    turnLabel.className = "turn-label";
+    turnLabel.textContent = "Your turn.";
+    turnRow.appendChild(turnLabel);
+
+    // Talk input (bluff mode only)
+    if (state.bluff_mode) {
+      var talkWrap = document.createElement("span");
+      talkWrap.className = "talk-input-inline";
+      talkWrap.innerHTML = '<input type="text" id="human-talk-input" class="talk-input" placeholder="\ud83d\udcac Talk trash..." maxlength="120" />';
+      turnRow.appendChild(talkWrap);
+    }
+
+    btns.appendChild(turnRow);
+
     var raiseAction = null;
 
     // mainRow holds Fold / Check / Call / Raise / All-In (always shown first)
@@ -1017,7 +1051,7 @@ function renderChipChart(state) {
   if (state && state.players) {
     for (var i = 0; i < state.players.length; i++) {
       var p = state.players[i];
-      nameMap[p.id] = p.display_name || p.id;
+      nameMap[p.id] = (!SPECTATOR_MODE && p.id === HUMAN_ID) ? "Human" : (p.display_name || p.id);
     }
   }
 
@@ -1195,6 +1229,42 @@ function renderChipChart(state) {
   }
 }
 
+// ── Table talk box (below the table) ──────────────────────────────────────────
+
+var _lastTalkBoxKey = null;
+
+function renderTalks(state) {
+  var box = el("talk-box");
+  var content = el("talk-box-content");
+  if (!box || !content) return;
+
+  var talks = state.hand_talks || [];
+  if (!talks.length) {
+    box.style.display = "none";
+    _lastTalkBoxKey = null;
+    return;
+  }
+
+  // Dedup: only re-render when the talk list changes
+  var talkKey = talks.map(function(t) { return t.player_id + ":" + t.talk; }).join("|");
+  if (talkKey === _lastTalkBoxKey) return;
+  _lastTalkBoxKey = talkKey;
+
+  box.style.display = "block";
+  content.innerHTML = "";
+
+  for (var i = 0; i < talks.length; i++) {
+    var t = talks[i];
+    var line = document.createElement("div");
+    line.className = "talk-line";
+    line.innerHTML = '<span class="talk-name">' + escapeHtml(t.display_name || t.player_id) + ':</span> '
+      + '<span class="talk-msg">\u201c' + escapeHtml(t.talk) + '\u201d</span>';
+    content.appendChild(line);
+  }
+  // Auto-scroll to bottom
+  content.scrollTop = content.scrollHeight;
+}
+
 function renderState(state) {
   if (!state) return;
   lastStateJSON = JSON.stringify(state);
@@ -1205,6 +1275,7 @@ function renderState(state) {
   trackChipHistory(state);
   renderChipChart(state);
   renderThinking(state.last_action || null);
+  renderTalks(state);
   appendHandResultToLog(state);
   renderActions(state);
 
@@ -1232,10 +1303,20 @@ function sendAction(action) {
     actionLabel = atype;
   }
 
+  // Grab human talk (if bluff mode talk input exists)
+  var humanTalk = null;
+  var talkInput = el("human-talk-input");
+  if (talkInput && talkInput.value.trim()) {
+    humanTalk = talkInput.value.trim();
+  }
+
+  var payload = { player_id: HUMAN_ID, action: action };
+  if (humanTalk) payload.talk = humanTalk;
+
   fetch(API + "/games/" + gameId + "/action", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ player_id: HUMAN_ID, action: action }),
+    body: JSON.stringify(payload),
   })
     .then(function (r) {
       if (r.status === 404) { clearGame(); return null; }

@@ -48,6 +48,7 @@ ACTION_FIELDS = [
     "action_amount",    # integer for call/raise; empty for fold/check
     "thinking",         # LLM chain-of-thought (may be multi-line; CSV-quoted)
     "failure_reason",   # timeout / parse_error / api_error; empty = success
+    "talk",             # table talk message (bluff mode); empty if silent
 ]
 
 HAND_FIELDS = [
@@ -133,6 +134,7 @@ def log_action(
     action_amount: Optional[int],
     thinking: Optional[str],
     failure_reason: Optional[str],
+    talk: Optional[str] = None,
 ) -> None:
     """Append one action row to actions.csv inside this game's folder (thread-safe)."""
     row = {
@@ -151,6 +153,7 @@ def log_action(
         "action_amount":   "" if action_amount is None else action_amount,
         "thinking":        thinking or "",
         "failure_reason":  failure_reason or "",
+        "talk":            talk or "",
     }
     with _lock:
         path = os.path.join(_game_dir(game_id), "actions.csv")

@@ -83,9 +83,10 @@ def _make_display_names(players: list) -> dict:
     seen: Counter = Counter()
     names: dict = {}
     for i, spec in enumerate(players):
-        if spec == "human":
-            continue
         pid = f"player_{i}"
+        if spec == "human":
+            names[pid] = "Human"
+            continue
         seen[spec] += 1
         total = spec_count[spec]
 
@@ -116,6 +117,7 @@ def _create_game(base: str, args: argparse.Namespace,
         "starting_stack": args.starting_stack,
         "player_models": player_models,
         "player_names": player_names,
+        "bluff_mode": getattr(args, "bluff_mode", False),
     }
     r = requests.post(f"{base}/games", json=body, timeout=5)
     r.raise_for_status()
@@ -426,6 +428,13 @@ Examples (with API key):
             "spectator and human mode. "
             "Requires: pip install playwright && playwright install chromium"
         ),
+    )
+    parser.add_argument(
+        "--bluff-mode",
+        action="store_true",
+        default=False,
+        dest="bluff_mode",
+        help="Encourage LLM players to bluff more and be cautious of bluffs.",
     )
     parser.add_argument(
         "--auto-exit",

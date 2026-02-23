@@ -36,6 +36,7 @@ def create_game(
     bot_player_ids: Optional[List[str]] = None,
     player_models: Optional[Dict[str, str]] = None,
     player_names: Optional[Dict[str, str]] = None,
+    bluff_mode: bool = False,
 ) -> str:
     config = GameConfig(
         small_blind=small_blind,
@@ -76,7 +77,7 @@ def create_game(
 
     if player_models:
         for pid, spec in player_models.items():
-            bots[pid] = create_bot(spec, api_key=api_key)
+            bots[pid] = create_bot(spec, api_key=api_key, bluff_mode=bluff_mode)
     elif bot_player_ids:
         for pid in bot_player_ids:
             bots[pid] = None
@@ -91,6 +92,7 @@ def create_game(
         "hand_result_logged": False, # True once the current hand's result is written to disk
         "bust_order": [],           # [{player_id, display_name, hand_number}] in bust order
         "failure_stats": {},        # {player_id: {total_moves, timeout, parse_error, api_error}}
+        "hand_talks": [],           # [{player_id, display_name, talk}] — reset each hand
         "creation_config": {   # stored so the game can be cloned
             "num_players": num_players,
             "small_blind": small_blind,
@@ -99,6 +101,7 @@ def create_game(
             "bot_player_ids": bot_player_ids,
             "player_models": player_models,
             "player_names": player_names,
+            "bluff_mode": bluff_mode,
         },
     }
     return gid
@@ -177,6 +180,31 @@ def get_failure_stats(game_id: str) -> Dict[str, Any]:
     return dict(s["failure_stats"]) if s else {}
 
 
+def get_hand_talks(game_id: str) -> List[Dict[str, Any]]:
+    """Return the list of table talk messages for the current hand."""
+    s = _sessions.get(game_id)
+    return list(s["hand_talks"]) if s else []
+
+
+def add_hand_talk(game_id: str, player_id: str, display_name: str, talk: str) -> None:
+    """Append a talk message to the current hand's talk list."""
+    s = _sessions.get(game_id)
+    if s and talk:
+        s["hand_talks"].append({
+            "player_id": player_id,
+            "display_name": display_name,
+            "talk": talk,
+        })
+
+
+def get_bluff_mode(game_id: str) -> bool:
+    """Return whether bluff mode is enabled for this game."""
+    s = _sessions.get(game_id)
+    if not s:
+        return False
+    return s.get("creation_config", {}).get("bluff_mode", False)
+
+
 def is_bot_turn(game_id: str) -> bool:
     game = get_game(game_id)
     if not game:
@@ -205,6 +233,7 @@ def next_hand(game_id: str) -> bool:
         return False
     s["hands_played"] += 1
     s["hand_result_logged"] = False        # ready to log the new hand
+    s["hand_talks"] = []                   # reset table talk for new hand
     s["controller"].start_hand()
     s["last_action"] = None
     return True
@@ -288,11 +317,14 @@ def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
         # Fetch state once before the action (used for bot decision and logging).
         pre_state = game.get_state(viewer_id=p.id)
 
+        talk: Optional[str] = None
+
         if isinstance(bot, OpenRouterBot):
-            action = bot.decide(pre_state, p.id)
+            action = bot.decide(pre_state, p.id, talk_history=s["hand_talks"])
             thinking = getattr(bot, "last_thinking", None)
             failure_reason = getattr(bot, "last_failure_reason", None)
             raw_response = getattr(bot, "last_raw_response", None)
+            talk = getattr(bot, "last_talk", None)
         elif isinstance(bot, RandomBot):
             action = bot.decide(pre_state, p.id)
         else:
@@ -326,7 +358,16 @@ def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
             action_amount=action.get("amount"),
             thinking=thinking,
             failure_reason=failure_reason,
+            talk=talk,
         )
+
+        # Record table talk for this hand (if any)
+        if talk:
+            s["hand_talks"].append({
+                "player_id": p.id,
+                "display_name": p.display_name or p.id,
+                "talk": talk,
+            })
 
         # Format a human-readable action label
         atype = action.get("type", "?")
@@ -345,6 +386,7 @@ def apply_bot_action(game_id: str) -> Optional[Dict[str, Any]]:
             "display_name": p.display_name or p.id,
             "action_label": action_label,
             "thinking": thinking,
+            "talk": talk,
             "failure_reason": failure_reason,  # None = success; else "timeout"/"parse_error"/"api_error"
             "raw_response": raw_response if failure_reason else None,  # only include on failures to save bandwidth
         }

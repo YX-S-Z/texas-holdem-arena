@@ -115,6 +115,31 @@ Good pot odds to continue.
 {"action": "call"}
 """
 
+BLUFF_ADDENDUM = """
+BLUFF MODE — additional instructions:
+- Bluffing is a core part of your strategy. Look for good spots to represent \
+strong hands you don't have — especially in position, on scary boards, or \
+when opponents show weakness.
+- Consider semi-bluffs with drawing hands. A well-timed raise on a wet board \
+can win pots you'd otherwise lose.
+- Be suspicious of your opponents' bets. They may be bluffing too. Don't fold \
+too easily to single bets — consider their betting patterns, position, and \
+whether the board texture supports the hand they're representing.
+- Balance aggression with caution: a good bluff is believable, but don't \
+over-bluff into calling stations.
+
+TABLE TALK (REQUIRED):
+- You MUST say something to the other players every turn. The "talk" field is MANDATORY in your JSON.
+- Talk trash! Taunt opponents by name, call out their bluffs, brag about your hand, \
+threaten to take their chips, mock their past mistakes, or try to get under their skin.
+- Use talk strategically: mislead about your hand strength, build fake alliances, \
+dare opponents to call, or psyche them out with confident declarations.
+- Other players will see what you say and may use it against you — so be clever.
+- Add a "talk" field to your JSON: {"action": "raise", "amount": 80, "talk": "Nice try GPT, but I've got you crushed this time."}
+- Keep talk short (one sentence). Be bold, creative, and entertaining.
+- You can see what other players have said this hand — use it to fire back at them.
+"""
+
 # ---------------------------------------------------------------------------
 # Parser helpers — module-level for clarity
 # ---------------------------------------------------------------------------
@@ -151,17 +176,25 @@ def model_display_name(model_id: str) -> str:
 class OpenRouterBot:
     """A poker player backed by an LLM via the OpenRouter API."""
 
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, bluff_mode: bool = False):
         """
         Args:
             api_key: OpenRouter API key.
             model:   Full model ID or shorthand alias (e.g. "claude", "gpt-4o").
+            bluff_mode: If True, append bluff-encouraging instructions to the system prompt.
         """
         self.api_key = api_key
         self.model = resolve_model(model)
         self.display_name = model_display_name(self.model)
+        self.bluff_mode = bluff_mode
+        self.system_prompt = SYSTEM_PROMPT + BLUFF_ADDENDUM if bluff_mode else SYSTEM_PROMPT
 
-    def decide(self, state: Dict[str, Any], player_id: str) -> Dict[str, Any]:
+    def decide(
+        self,
+        state: Dict[str, Any],
+        player_id: str,
+        talk_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """
         Given game state scoped to this player (viewer_id=player_id, so only
         this player's hole cards are visible), return an action dict:
@@ -176,6 +209,7 @@ class OpenRouterBot:
               "timeout"      API call exceeded REQUEST_TIMEOUT
               "parse_error"  Response received but no valid JSON action found
               "api_error"    Any other exception (HTTP error, network, etc.)
+          self.last_talk          — table talk string (or None)
 
         Falls back to the safest legal action (check > call > fold) on any failure.
         """
@@ -183,11 +217,12 @@ class OpenRouterBot:
         self.last_thinking: Optional[str] = None
         self.last_failure_reason: Optional[str] = None
         self.last_raw_response: Optional[str] = None
+        self.last_talk: Optional[str] = None
 
         if not legal:
             return {"type": "fold"}
 
-        user_msg = self._build_user_message(state, player_id)
+        user_msg = self._build_user_message(state, player_id, talk_history=talk_history)
         action = None
         last_raw: Optional[str] = None
         try:
@@ -196,6 +231,7 @@ class OpenRouterBot:
                 self.last_raw_response = raw
                 last_raw = raw
                 self.last_thinking = self._extract_thinking(raw)
+                self.last_talk = self._extract_talk(raw)
                 action = self._parse_response(raw, legal)
                 if action is not None:
                     break
@@ -219,13 +255,22 @@ class OpenRouterBot:
             self.last_failure_reason = "api_error"
             print(f"[bot:{self.display_name}] api_error: {exc}")
 
+        # In bluff mode, talk is mandatory — inject a default if the model didn't provide one.
+        if self.bluff_mode and not self.last_talk:
+            self.last_talk = "..."
+
         return action if action is not None else self._fallback_action(legal)
 
     # ------------------------------------------------------------------
     # Prompt construction
     # ------------------------------------------------------------------
 
-    def _build_user_message(self, state: Dict[str, Any], player_id: str) -> str:
+    def _build_user_message(
+        self,
+        state: Dict[str, Any],
+        player_id: str,
+        talk_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
         """
         Build the per-turn user message.  The system prompt is sent separately
         so models that support system roles receive the role context once,
@@ -281,6 +326,19 @@ class OpenRouterBot:
             elif t == "fold":
                 action_lines.append('  {"action": "fold"}')
 
+        # Table talk history (bluff mode only)
+        talk_lines: List[str] = []
+        if talk_history:
+            talk_lines.append("")
+            talk_lines.append("Table talk this hand:")
+            for t in talk_history:
+                name = t.get("display_name", t.get("player_id", "?"))
+                msg = t.get("talk", "")
+                if msg:
+                    talk_lines.append(f'  {name}: "{msg}"')
+                else:
+                    talk_lines.append(f"  {name}: (silent)")
+
         lines = [
             f"=== Your turn — {my_name} ===",
             "",
@@ -294,6 +352,7 @@ class OpenRouterBot:
             "",
             "Opponents:",
             *opp_lines,
+            *talk_lines,
             "",
             "Available actions (copy the JSON exactly, fill in N for raise):",
             *action_lines,
@@ -320,6 +379,28 @@ class OpenRouterBot:
         return thinking if thinking else None
 
     # ------------------------------------------------------------------
+    # Talk extraction
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_talk(raw: str) -> Optional[str]:
+        """Extract the 'talk' field from the last JSON block in the response."""
+        cleaned = re.sub(r"```(?:json)?\s*", "", raw).replace("```", "")
+        for candidate in reversed(re.findall(r"\{[^{}]+\}", cleaned)):
+            try:
+                data = json.loads(candidate)
+            except (json.JSONDecodeError, ValueError):
+                # Try single-quote fallback
+                try:
+                    data = json.loads(candidate.replace("'", '"'))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+            talk = data.get("talk")
+            if talk and isinstance(talk, str):
+                return talk.strip()
+        return None
+
+    # ------------------------------------------------------------------
     # API call
     # ------------------------------------------------------------------
 
@@ -331,7 +412,7 @@ class OpenRouterBot:
         body = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self.system_prompt},
                 {"role": "user",   "content": user_message},
             ],
             "temperature": 0.7,

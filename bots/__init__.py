@@ -6,7 +6,7 @@ from .random_bot import RandomBot
 from .openrouter_bot import OpenRouterBot, resolve_model, model_display_name
 
 
-def create_bot(spec: str, api_key: Optional[str] = None) -> Any:
+def create_bot(spec: str, api_key: Optional[str] = None, bluff_mode: bool = False) -> Any:
     """
     Return a bot instance for the given player spec.
 
@@ -19,4 +19,4 @@ def create_bot(spec: str, api_key: Optional[str] = None) -> Any:
         return RandomBot()
     if spec == "simple":
         return None  # handled by _simple_action in game_session
-    return OpenRouterBot(api_key=api_key or "", model=spec)
+    return OpenRouterBot(api_key=api_key or "", model=spec, bluff_mode=bluff_mode)

@@ -1253,7 +1253,10 @@ function renderTalks(state) {
   box.style.display = "block";
   content.innerHTML = "";
 
-  for (var i = 0; i < talks.length; i++) {
+  // Show only the last 3 talks to prevent the box from covering system info
+  var MAX_VISIBLE_TALKS = 3;
+  var startIdx = Math.max(0, talks.length - MAX_VISIBLE_TALKS);
+  for (var i = startIdx; i < talks.length; i++) {
     var t = talks[i];
     var line = document.createElement("div");
     line.className = "talk-line";

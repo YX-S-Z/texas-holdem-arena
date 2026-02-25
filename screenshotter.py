@@ -80,7 +80,15 @@ class Screenshotter:
                 viewport={"width": self.viewport[0], "height": self.viewport[1]},
             )
             self._page = ctx.new_page()
-            self._page.goto(self.url, wait_until="networkidle", timeout=15_000)
+            # Use "load" instead of "networkidle": the frontend polls the
+            # server every 2 s via setInterval, so the network is *never*
+            # idle and "networkidle" would always time out.
+            self._page.goto(self.url, wait_until="load", timeout=30_000)
+            # Wait for the game UI to actually render (player divs appear
+            # after the first successful poll populates the #players container).
+            self._page.wait_for_selector(
+                "#players .player", state="attached", timeout=30_000,
+            )
             self.out_dir.mkdir(parents=True, exist_ok=True)
             print(f"[screenshots] Headless browser ready → {self.out_dir}")
             return True
@@ -193,7 +201,6 @@ class Screenshotter:
 
         try:
             self._page.screenshot(path=str(path))
-            print(f"[screenshots] {path.name}")
             return path
         except Exception as exc:  # noqa: BLE001
             print(f"[screenshots] capture failed: {exc}")

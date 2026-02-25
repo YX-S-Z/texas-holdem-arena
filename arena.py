@@ -331,7 +331,16 @@ def _spectator_loop(
 
 
 def _human_screenshot_loop(base: str, game_id: str, ss) -> None:
-    """Background daemon thread: capture screenshots on state changes in human mode."""
+    """Background daemon thread: capture screenshots on state changes in human mode.
+
+    Playwright's sync API binds to the greenlet/thread that called start(),
+    so we must call ss.start() here — on the same thread that will later
+    call ss.capture() — rather than on the main thread.
+    """
+    if not ss.start():
+        print("[screenshots] Disabled — see error above.\n")
+        return
+
     hands_seen = 0
     last_sig = None  # (phase, current_player_id) — detects every turn/phase change
 
@@ -553,9 +562,13 @@ def main() -> None:
         if game_dir:
             ss_dir = Path(game_dir) / "game_states_figs"
             ss = Screenshotter(ss_dir, url)
-            if not ss.start():
-                ss = None
-                print("[screenshots] Disabled — see error above.\n")
+            if spectator:
+                # Spectator mode: start() and capture() both run on main thread.
+                if not ss.start():
+                    ss = None
+                    print("[screenshots] Disabled — see error above.\n")
+            # Human mode: start() is deferred to the background thread
+            # (Playwright binds to the thread that calls start()).
         else:
             print("[screenshots] Game folder not found yet; screenshots disabled.\n")
 
@@ -564,7 +577,7 @@ def main() -> None:
         _spectator_loop(base, game_id, args.hands, screenshotter=ss, auto_exit=args.auto_exit)
     else:
         # Human mode: keep server alive, browser drives everything.
-        # Screenshots run in a background daemon thread if requested.
+        # Screenshots run entirely in a background daemon thread.
         if ss:
             t = threading.Thread(
                 target=_human_screenshot_loop,
@@ -578,7 +591,10 @@ def main() -> None:
                 time.sleep(1)
         except KeyboardInterrupt:
             if ss:
-                ss.stop()
+                # Only render the video from the main thread; the browser
+                # was started on the daemon thread and will be cleaned up
+                # when the process exits (Playwright is not thread-safe).
+                ss.render_video()
             print("\nStopped.")
 
 
